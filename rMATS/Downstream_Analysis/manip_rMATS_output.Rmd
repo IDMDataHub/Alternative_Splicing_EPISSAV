@@ -1,0 +1,378 @@
+---
+title: From rMATS output to heatmap of diff splicing events on EPIS-SAV samples
+author: "Maria Kondili"
+date: "12/09/2025"
+output:
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+Objective: Use rMATS output & Merge all events-types & Create heatmap of diff splicing events
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(glue))
+
+```
+
+```{r input_and_output_dir}
+
+#work_dir="/shared/projects/shmbnl_rnaseq/4W_et_10W/rMATS_Splicing/"
+work_dir="/shared/projects/splicing_events_detection_rare_diseases/EPIS_SAV/rMATS/"
+load(".RData")
+
+stat_outdir <- paste0(work_dir,"Outputs/one_group_stat_off/output_all_statoff/Stats_out/")
+downstream_outdir <- paste0(work_dir,"Outputs/one_group_stat_off/","Downstream_Outputs/")
+
+dir.create(downstream_outdir, showWarnings = F)
+
+samples <- c( "44", "45","47","4F","4G","K","L","M","N","P","Q","R","S","U","W","Y","Z" ) 
+
+## Create output folder to save merged table
+for (s in samples) {
+  final_outdir <- paste0(downstream_outdir,"final_",s,"_vs_all/")
+  dir.create(final_outdir, showWarnings = F)
+
+}
+
+
+```
+
+Modify rMATS tables with custom exon-coordinates (upstream/spliced/downstream positions)
+
+```{r add_exon_info, message=FALSE, warning=FALSE}
+
+functions_dir <- paste0(work_dir,"Downstream_analysis/functions/")
+
+source(paste0(functions_dir,"add_exonLength_and_Coord.R"))
+
+splice_events <- c("A3SS", "A5SS","MXE", "RI", "SE")
+## output in same folder but with suffix "_exonCoord"
+
+
+##> Read Output of STAT-step and add exon-length and coordinates 
+
+for (s in samples) {
+  cat("\n~~>Sample ", s,"is analysed now...\n")
+  resdir_s <- paste0(stat_outdir,s,"_vs_all/") 
+  final_outdir_s <- paste0(downstream_outdir,"final_",s,"_vs_all/")
+  
+  for (se in splice_events) {
+      cat("~~> Launching event :",se,"\n")
+
+      add_exonLen_and_coord(splice_event=se,
+                            tab_suffix=".MATS.JCEC.txt",
+                            in_dir  = resdir_s,
+                            out_dir = final_outdir_s)
+  }
+
+  cat("New tables can be found here:\n")
+  print(list.files(final_outdir_s ))
+  
+}
+
+```
+
+Merge Events in one table, with a given order of columns
+
+```{r merge_events }
+
+source(paste0(functions_dir,"/merge_spliceTypes_and_save.R"))
+
+new_suffix = ".JCEC_PerRepl_exonCoord.txt"
+
+inc_level_all_others <- paste("IncLevel2_r", seq(1,16), sep="")
+  
+colsOI <- c("GeneID",	"geneSymbol","chr","strand",
+            "IncFormLen", "SkipFormLen","ExonLength",
+            "IncLevel1_r1", inc_level_all_others,	
+            "splice_event", "IncLevelDifference",
+            "alternative_exon_coordinates","PValue","FDR" )
+
+```
+
+MERGE
+
+```{r merge_output_events_per_sample }
+
+for (s in samples) {
+  #s="4F", "4G" #-> empty !!
+  cat("\n~~> Outputs of Sample ",s,"will be merged now...\n" )
+  
+  final_outdir_s <- paste0(downstream_outdir,"final_",s,"_vs_all/")
+  
+  ase_mrg <- merge_spliceTypes_and_save(splice_events, 
+                                        new_suffix, colsOI, 
+                                        indir=final_outdir_s) 
+                                      
+  ase_mrg <- rename(ase_mrg,"dPSI"="IncLevelDifference")
+  colnames(ase_mrg) <- gsub("IncLevel1_*", paste0("IncLevel_",s,"_"),colnames(ase_mrg))
+  
+  ase_mrg$RowID <- rownames(ase_mrg)
+  rownames(ase_mrg) <- NULL
+
+  ase_mrg %>%  glimpse
+
+  mrg_filename=paste0("merged_modif_ASE_sample",s,"_FDRsorted.tsv")
+  # write.table( ase_mrg[order(ase_mrg$FDR,decreasing = F),],
+  #            paste0(final_outdir_s, mrg_filename),
+  #            sep="\t", col.names = T,row.names = F,quote=F )
+  
+  readr::write_delim(x = ase_mrg[order(ase_mrg$FDR,decreasing = F),],
+                    file = paste0(final_outdir_s, mrg_filename),
+                     delim= "\t",col_names = TRUE,quote = NULL)
+
+
+}
+
+```
+
+PLOT Heatmap with significantly spliced events 
+
+```{r plot_heatmap_function,eval=F}
+
+plot_heatmap_signif_splice <- function(ase, fdr.co, psi.co, pair, inc_level_cols= c(8:13)) {
+  
+    ase.filt <- subset(ase, (FDR < fdr.co &  abs(dPSI) > psi.co) )
+    
+    
+    ###  z.gene =  (E(g) - Mean(g.replicates) ) / M.A.D (g.replicates), mad=median.absolute.deviation
+    x <- ase.filt[,inc_level_cols]
+    s1 = strsplit(pair, "_vs_")[[1]][1]
+    s2 = strsplit(pair, "_vs_")[[1]][2]
+    colnames(x) <- c( paste(s1,"_", c("r1","r2","r3"),sep=""),
+                      paste(s2,"_",c("r1","r2","r3"),sep=""))
+    
+    
+    cal_z_score <- function(x){
+      (x - mean(x)) / sd(x)
+    }
+    x_norm <- t(apply(x, 1, cal_z_score))
+    # x_norm <- x_norm[-which(apply(x_norm, 2, is.na)) ,]
+    
+    #Rowv=as.dendrogram(hcl_row),tree=ct))
+    library(gplots)
+    library(RColorBrewer)
+    
+   
+    heatmap.2(x_norm, 
+              Rowv=TRUE,
+              Colv=F,
+              dendrogram ='row',
+              scale="row", na.rm=TRUE,
+              trace='none',
+              labCol=colnames(x),
+              col=rev(colorRampPalette(brewer.pal(10, "RdBu"))(256)),
+              margins=c(9,2),
+              cexCol=1.3,
+              srtCol=45,
+              labRow="",
+              offsetCol=0,
+              key=TRUE,
+              keysize = 1.5,
+              density.info="density",
+              key.title="Color range",
+              key.xlab="norm.counts",
+              key.ylab="Counts",
+              key.par=list(mar=c(3,4,3,1)),
+              notecex=3, 
+              main=paste(nrow(x_norm),"signif. Diff/ial splicing events\nin ",pair))
+    #print(hmp)
+    return(ase.filt)
+   
+}
+
+```
+
+
+#### PCA of samples on Incl.level 
+
+```{r pca_on_incl_level,echo=T ,eval=F}
+
+mrg_4w_10w <- dplyr::inner_join(ase_mrg_4w,ase_mrg_10w, by="alternative_exon_coordinates")
+
+mrg_4w_10w.sig <- subset(mrg_4w_10w, FDR.x < 0.05 ) #  2088
+
+mrg_4w_10w.incLevels <- cbind(mrg_4w_10w.sig [,grep("IncLevel_4WC_*", colnames(mrg_4w_10w.sig ))],
+                              mrg_4w_10w.sig [,grep("IncLevel_4WM_*", colnames(mrg_4w_10w.sig ))],
+                              mrg_4w_10w.sig [,grep("IncLevel_10WC_*", colnames(mrg_4w_10w.sig ))],
+                              mrg_4w_10w.sig [,grep("IncLevel_10WM_*", colnames(mrg_4w_10w.sig ))] )
+
+mrg_4w_10w.incLevels <- mrg_4w_10w.incLevels %>% drop_na()
+
+colnames(mrg_4w_10w.incLevels) <- gsub("IncLevel_","",colnames(mrg_4w_10w.incLevels))
+
+pca_res <- prcomp(t(mrg_4w_10w.incLevels ), scale=F) 
+#do PCA on genes ,not columns/samples
+summary(pca_res)
+names(pca_res)
+
+var_explained <- pca_res$sdev^2/sum(pca_res$sdev^2)
+
+#png("Plots/PCA_Incl_levels_4W_et_10W.png")
+pca_res$x %>%
+  as.data.frame %>%
+  rownames_to_column("Samples") %>% 
+  # create a new column  "Conditions", from samples, without the suffix "r[1-4]
+  separate(col=Samples,into = c("Conditions"), sep ="_r[1-4]") %>% 
+  ggplot(aes(x=PC1,y=PC2)) + 
+  geom_point(aes(color=Conditions),size=3) +
+  theme_bw(base_size=10) +
+  labs(x=paste0("PC1: ",round(var_explained[1]*100,1),"%"),
+       y=paste0("PC2: ",round(var_explained[2]*100,1),"%")) +
+  ggtitle("PCA of splicing")
+  # + theme(legend.position="top")
+#dev.off()
+
+
+
+```
+
+##### VolcanoPlot of Incl.Level with dPSI & FDR ==> .x = 4WM/4WC
+
+```{r}
+
+FDR_co = 1.3
+dpsi_co = 0.1
+
+
+condition <- with(mrg_4w_10w, ifelse(dPSI.x > dpsi_co &  
+                                       -log10(FDR.x) > FDR_co, "signif_UpSpliced", 
+                                       ifelse(dPSI.x < - dpsi_co & 
+                                       -log10(FDR.x) > FDR_co, "signif_DownSpliced", 
+                                       "Not_Significant")))
+
+colour_values <- c("signif_UpSpliced" = "green4",
+                   "signif_DownSpliced"  = "tomato1",
+                   "Not_Significant" = "grey15")
+
+png("Plots/Volcano_All_Genes_signif_in_4WM_vs_10WM.png")
+vlcpl <- ggplot(data=mrg_4w_10w) + 
+          geom_point(aes(x=dPSI.x, y=-log10(FDR.x),colour=condition)) +
+          scale_color_manual(name="", values=colour_values) +
+          theme(legend.position = "right") +   
+          xlab("dPSI") + ylab("-log10(FDR)") + 
+          xlim(c(-1.5,1.5)) +  ylim(c(0,20) )  +
+          ggtitle("Signif Splicing 4WM-vs-4WC")
+print(vlcpl)
+dev.off()
+
+```
+
+##### VolcanoPlot of Incl.Level with dPSI & FDR ==> .x = 10WM/10WC
+
+```{r}
+
+FDR_co = 1.3
+dpsi_co = 0.1
+
+
+condition <- with(mrg_4w_10w, ifelse(dPSI.y > dpsi_co &  
+                                    -log10(FDR.y) > FDR_co, "signif_UpSpliced", 
+                                     ifelse(dPSI.y < - dpsi_co & 
+                                    -log10(FDR.y) > FDR_co, "signif_DownSpliced", 
+                                       "Not_Significant")))
+
+colour_values <- c("signif_UpSpliced"    = "green4",
+                   "signif_DownSpliced"  = "tomato1",
+                   "Not_Significant"     = "grey15" )
+
+png("Plots/Volcano_Signif_Splicing_in_10WM-vs-10WC.png")
+vlcpl <- ggplot(data=mrg_4w_10w) + 
+          geom_point(aes(x=dPSI.y, y=-log10(FDR.y),colour=condition)) +
+          scale_color_manual(name="", values=colour_values) +
+          theme(legend.position = "right") +   
+          xlab("dPSI") + ylab("-log10(FDR)") + 
+          xlim(c(-1.5,1.5)) +  ylim(c(0,20) )  +
+          ggtitle("Signif Splicing 10WM-vs-10WC")
+print(vlcpl)
+
+dev.off()
+
+```
+
+
+```{r create_piechart_function,echo=F,include=F}
+
+create_pieChart_Splicing <- function(ase, pair, signif.co,psi.co) {
+  ##""" Test with : ase = ase.saline; pair="Saline_vs_MBNLdecoy" ; signif.co =0.05 ; psi.co=0.20 """
+  
+  library(ggplot2)
+
+  ## Count events Signif. splicing : 
+  ## count InclDifference(dPSI) = mean(Saline) -  mean(MBNLdecoy)
+  ## INCLUDED : PSI < -0.15 
+  ## EXCLUDED : PSI > 0.15
+  
+  signif <- nrow(subset(ase, (FDR < signif.co  &  abs(dPSI) >= psi.co )))
+  all_splice <-  nrow(ase)
+  
+  splice_counts <- data.frame(category=c("All", "Signif & highPSI"),
+                              count=c(all_splice,signif))
+  
+  ## calculate percentage of each count : 
+  splice_counts$fraction = round(splice_counts$count / sum(splice_counts$count),2) * 100
+  
+  # Compute the cumulative percentages (top of each rectangle)
+  splice_counts$ymax = cumsum(splice_counts$fraction)
+  
+  # Compute the bottom of each rectangle
+  splice_counts$ymin = c(0, head(splice_counts$ymax, n=-1))
+  
+  # Compute label position
+  # pos <- (splice_counts$ymax + splice_counts$ymin) / 2 # = 49.0 98.5 99.5
+  # 98 & 99 are very close, I ll replace them with 97 and 10, left and right of the end of circle.
+  splice_counts$labelPosition <- c(50.0, 97.0)
+  
+  # Compute a good label
+  splice_counts$label <- paste0(splice_counts$category,"\n", splice_counts$fraction, " %")
+  
+  # Make the plot
+  dir.create("Plots/",showWarnings = F)
+  #png(paste0("Plots/Donut_Plot_Signif_SplicingEvents_",pair,".png"))
+    ggplot(splice_counts, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=category)) +
+      geom_rect() +
+      geom_label( x=3.5, aes(y=labelPosition, label=label), size=3) +
+      coord_polar(theta="y") + 
+      xlim(c(2, 4)) + 
+      theme_void()
+ #dev.off()
+    
+}
+
+```
+
+
+```{r, call_function,echo=F,eval=F}
+## call it with ASE table : 
+# create_pieChart_Splicing(ase_mrg, pair="Saline_vs_MBNLdecoy",signif.co=0.05, psi.co=0.20)
+
+```
+
+
+##> Search for common genes  :
+
+```{r,echo=F,eval=F}
+ase_mrg_4w.filt$geneSymbol[which(ase_mrg_4w.filt$geneSymbol %in% ase_mrg_10w.filt$geneSymbol)]
+
+ase_mrg_4w.filt$geneSymbol[which(ase_mrg_4w.filt$geneSymbol %in% ase_mrg_10vs4.filt$geneSymbol)]
+
+
+
+```
+
+Search for unique /different of one from others: 
+
+```{r ,echo=F,eval=F}
+ase_mrg_4w.filt[which(! ase_mrg_4w.filt$geneSymbol %in% ase_mrg_10w.filt$geneSymbol),]
+
+ase_mrg_4w.filt[which(! ase_mrg_4w.filt$geneSymbol %in% ase_mrg_10vs4.filt$geneSymbol),]
+
+
+```
+
+

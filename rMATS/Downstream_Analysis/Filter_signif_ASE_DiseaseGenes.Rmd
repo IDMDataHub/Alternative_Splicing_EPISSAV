@@ -1,0 +1,258 @@
+---
+title: "Filter signif ASE with Muscle-Disease Genes"
+author: "Maria Kondili"
+date: "2025-10-15"
+output: 
+ html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+Objective: Detect the A.S.E. with highest dPSI and lowest FDR, from the merged_ASE_FDR_sorted tables and also that fall over a muscle-disease gene (from published "gene-tables", Bonne & Rivier )
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(glue))
+
+library(readxl)
+library(dplyr)
+library(stringr)
+library(purrr)
+library(tibble)
+```
+
+
+```{r}
+
+#work_dir="/shared/projects/splicing_events_detection_rare_diseases/EPIS_SAV/rMATS/"
+
+work_dir="~/MYO_WORKSPACE/PROJECTS/EPIS_SAV-JohnRendu/rMATS/Downstream_Analysis/"
+setwd(work_dir)
+load(".RData")
+
+#downstream_outdir = paste0(work_dir,"Outputs/one_group_stat_off/Downstream_Outputs/")
+downstream_outdir = paste0(work_dir,"../Outputs/one_group_stat_off/Downstream_Outputs/")
+
+dir.create(downstream_outdir, showWarnings = F)
+
+#mrg_filt_outdir <- paste0(downstream_outdir,"Merged_Filtered_ASEs/") # created inside sample "final"
+#dir.create(mrg_filt_outdir ,showWarnings = FALSE)
+
+```
+
+
+```{r samples }
+
+samples <- c("4F","4G","44","45","47","K","L","M","N","P","Q","R","S","U","W","Y","Z")
+
+```
+
+### Filter splicing events by dPSI & FDR
+
+```{r dir_filtered}
+
+## create new folder to save filtered-rmats-results:
+filtres_dir <- paste0(downstream_outdir, "filt_by_dPSI_FDR_GeneTables/" ) 
+
+dir.create(filtres_dir, showWarnings = FALSE)
+
+```
+
+```{r filter_signif_mrg_ase,echo=F,eval=F}
+
+for (s in samples) {
+  
+  # Create output folder to save merged table
+  final_outdir  <- paste0(downstream_outdir,"final_",s,"_vs_all/")
+  
+  mrg_ase_file <- paste0(final_outdir,"merged_modif_ASE_sample",s,"_FDRsorted.tsv")
+  
+  mrg_ase <- read_delim(mrg_ase_file,delim = "\t", col_names = TRUE, show_col_types = FALSE)
+  
+  mrg_ase.filt <- mrg_ase %>% dplyr::filter(FDR <=0.05 & dPSI >= 0.5)
+  
+  print(glue::glue("~~> {nrow(mrg_ase.filt)} Significant events found !"))
+
+  head(mrg_ase.filt)
+  
+  write_delim(mrg_ase.filt,
+              paste0(filtres_dir, "merged_filt_modif_ASE_sample",s,".txt"),
+              delim = "\t",col_names = TRUE)
+
+}
+
+```
+
+#### Read MUSCLE-GENE-TABLES --> create a merged table for all diseases
+
+```{r read_geneTables}
+
+##1/ Read Tables and  add disease in a column --> merge tables to one
+
+gene_tables_dir <- paste0(work_dir,"../GeneTables_Bonne-Rivier/")
+
+mu_genetables <- list.files(gene_tables_dir, full.names = T)
+
+# names(mu_genetables) <- basename(mu_genetables) 
+#--> to be used if map_(.id="SourceFile") for detecting where each line of gene comes from
+## not needed since I added column of disease 
+
+diseases <- purrr::map_chr( mu_genetables, \(x) sub(".xlsx","", basename(x)) )
+
+
+read_gene_table <- function(genetable) {
+  
+  ## Input: filename of excel gene-table
+  ## Output: a tibble with modif.column names and disease_name new column
+  
+  genetab <- readxl::read_xlsx(genetable, skip = 1, col_names = TRUE)
+  
+  gene_col <- names(genetab)[str_detect(names(genetab), "Gene symbol")] 
+  
+  disease <- sub(".xlsx","", basename(genetable))
+  
+  genetab_modif <- genetab %>% 
+                    rename("GeneSymbol" = all_of(gene_col),
+                           "Item_in_genetable"=`Item in the gene table`) %>%
+                    mutate(Disease_name = disease)
+                           
+  return(genetab_modif)
+  
+}
+
+```
+
+#### Merge gene-tables 
+
+```{r merge_genetables }
+
+##from chatGPT: 
+mrg_genetables <- purrr::map_dfr(mu_genetables, read_gene_table, .id = "SourceFile")
+
+### Concatenate Diseases for each gene, to have unique Genes : 
+mrg_genetables_collapsed <- mrg_genetables %>%
+                              group_by(GeneSymbol) %>%
+                              summarise(Disease = paste(unique(Disease_name), collapse = "; ")) %>%
+                              ungroup()
+
+##write the merged-table in a file :
+readr::write_delim(mrg_genetables_collapsed,
+                   file = paste0(gene_tables_dir,"Merged_GeneTables_collapsed_diseases.txt"),
+                   delim = "\t",
+                   col_names = TRUE,
+                   na = "NA")
+                  
+
+```
+
+### Filter dy dPSI & FDR after chosing the disease-genes 
+
+Better calibration of output-genes when each filter is applied one by one and disease-genes at the end.
+
+```{r}
+
+filter_ase_by_gene_and_stats <- function(rmats_dir, genetable, my_fdr=0.05, my_dpsi= 0.5){
+  
+      s <-  sub("_vs_all","",sub("final_", "",basename(rmats_dir)) )
+      print(glue::glue("\n\n~~>Sample treated: {s}"))
+      
+      print(glue::glue("!Cut-offs chosen:FDR <= {my_fdr}, |dPSI| >= {my_dpsi}"))
+  
+      ## read the merged-rmats-output:
+      rmats_ase <- paste0(rmats_dir,"/merged_modif_ASE_sample",s,"_FDRsorted.tsv")
+      
+      ase_tab <- read_delim(rmats_ase, delim = "\t", col_names = TRUE, show_col_types = F )
+      
+    
+      ## Filter by stat:
+      ase_tab.filt <-  ase_tab %>% dplyr::filter(FDR <= my_fdr )
+      
+      print(glue::glue("#{length(ase_tab.filt$geneSymbol)} Significant events found for these genes !"))
+  
+     
+      ## Filter by dPSI :
+      ase_tab.filt2 <-  ase_tab.filt %>% dplyr::filter( abs(dPSI) >= my_dpsi)
+      
+      print(glue::glue("#{length(ase_tab.filt2$geneSymbol)} Highly spliced & signif. events found for these genes !"))
+
+      
+      ## Find Muscle-disease Genes (unique after collapsing) and keep Disease_name too :
+      
+      ase_tab.filt3 <- ase_tab.filt2 %>% filter(geneSymbol %in% mrg_genetables$GeneSymbol )
+      
+      # ase_tab.filt <- ase_tab %>% inner_join(genetable %>% 
+      #                                         dplyr::select(GeneSymbol,Disease),
+      #                                                by=c("geneSymbol" = "GeneSymbol") )
+      # 
+      ##NOTE 1: inner_join() keeps unique from "ase_tab" and "genetable"
+      ##         left_join() keeps all genes/splicing from ase_tab
+      ##NOTE 2 : adding "Disease" didn't help in well filtering the ase-tables, so only simple filtering of genes
+      
+      print(glue::glue("#{length(ase_tab.filt3$geneSymbol)} genes found associated to a disease,among the signif/ly spliced!\n"))
+      
+      
+      return(ase_tab.filt3)
+}
+
+```
+
+#### CALL function:
+
+```{r call_function}
+
+## create new folder to save filtered-rmats-results:
+
+filtres_dir <- paste0(downstream_outdir, "filt_by_dPSI_FDR_GeneTables/" ) ## and Disease-Gene! 
+
+final_outdirs <- list.files(paste0(downstream_outdir,"final_rmats_merged/"), pattern="final_*", full.names = TRUE)
+
+
+for (rmats_dir in final_outdirs){
+  
+    s <-  sub("_vs_all","",sub("final_", "",basename(rmats_dir)) )
+    ase_final.filt <- filter_ase_by_gene_and_stats(rmats_dir, mrg_genetables_collapsed,
+                                                   my_fdr = 0.05, my_dpsi = 0.2)
+    
+    ##> Ignore the Disease,bcs genes resting, are 0 or very few with inner/left_join
+    ## ase_final.filt  <- ase_final.filt %>% dplyr::relocate(c("Disease"), .before=c("chr"))
+    
+    
+    ase_final.filt  <- ase_final.filt %>% dplyr::relocate(c("alternative_exon_coordinates","PValue", "FDR","dPSI"),
+                                                          .before=c("IncFormLen"))
+
+    ## remove non-necessary columns:
+    ase_final.filt <- ase_final.filt %>% dplyr::select(- c(matches("IncLevel*"),"RowID"))
+    
+    print(ase_final.filt[1:4,1:6])
+    
+    readr::write_delim(ase_final.filt,
+                      file=paste0(filtres_dir, "merged_filt_modif_ASE_sample",s,".txt"),
+                      delim = "\t",col_names=TRUE,
+                      append=FALSE)
+     
+}
+
+
+```
+
+Save all txt in Excel 
+
+```{r save_in_excel}
+
+library(openxlsx)
+
+
+final_out_list <- list.files(filtres_dir,pattern="*.txt",full.names = TRUE)
+
+df_list <- map(final_out_list, ~read_delim(.x))
+
+names(df_list) <- samples
+
+write.xlsx(df_list, file=paste0(downstream_outdir,"KONTILI_InstitutMyologie_rMATS_final_results_17patients.xlsx"))
+
+
+```
+
