@@ -244,15 +244,101 @@ Save all txt in Excel
 
 library(openxlsx)
 
-
-final_out_list <- list.files(filtres_dir,pattern="*.txt",full.names = TRUE)
+final_out_list <- list.files(filtres_dir, pattern="*.txt", full.names = TRUE)
 
 df_list <- map(final_out_list, ~read_delim(.x))
 
 names(df_list) <- samples
+resu
+write.xlsx(df_list, file=paste0(downstream_outdir,"KONTILI_InstitutMyologie_rMATS_final_lts_17patients.xlsx"))
 
-write.xlsx(df_list, file=paste0(downstream_outdir,"KONTILI_InstitutMyologie_rMATS_final_results_17patients.xlsx"))
+
+```
+
+Count number of Splicing Events on final results --> Pie chart
+
+```{r count_events_types }
+
+#read.xlsx(paste0(downstream_outdir,"KONTILI_InstitutMyologie_rMATS_final_results_17patients.xlsx"),sheet = names(df_list)??)
+
+splice_events <- c("A3SS", "A5SS", "RI", "SE", "MXE")
+
+##> Create a list with frequency of each splice-event per sample : 
+
+splice_types_sum <- imap(df_list,  # maps over each element and keeps name 
+                    \(li, sample_name) {
+                      df <- data.frame(t(table(factor(li$splice_event, levels = splice_events))))
+                      colnames(df) <- c("Var1","Splice_Event","Frequency")
+                      df ##! must always print the value to be exported outside imap!
+                     }
+                    )
+
+##> Sum over all samples : 
+
+library(dplyr)
+library(purrr)
+
+global_splice_sum <- splice_types_sum |>
+                      bind_rows(.id = "sample_name") |>
+                      group_by(Splice_Event) |> 
+                      summarise(Total_Number = sum(Frequency, na.rm = TRUE),.groups = "drop")
+                      
+                      
 
 
+# global_splice_sum
+# # A tibble: 5 × 2
+#   Splice_Event Total_Number
+#   <fct>               <int>
+# 1 A3SS                   22
+# 2 A5SS                    4
+# 3 RI                     27
+# 4 SE                     46
+# 5 MXE                    11
+
+
+##> Pie Chart : 
+#---> old 
+# pie(global_splice_sum$Total_Number,
+#     labels=global_splice_sum$Splice_Event,
+#     main="Distribution of Splicing Events")
+
+##---> new 
+library(ggplot2)
+library(dplyr)
+
+ggplot(global_splice_sum, aes(x = "", y = Total_Number, fill = Splice_Event)) +
+  geom_col(width = 1) +
+  coord_polar(theta = "y") +
+  geom_text(aes(label=Total_Number), 
+            position = position_stack(vjust = 0.5),
+            size = 4)+
+  labs(
+    title = "Distribution of Splice Events over all patients",
+    fill = "Splice Event") +
+  theme_void()
+
+```
+
+Show Pie Chart with Percentages 
+
+```{r add_percentage_in_sums}
+
+#> add column to final tibble: 
+global_splice_pct <- global_splice_sum |>
+  mutate(
+    percentage = Total_Number / sum(Total_Number) * 100,
+    label = paste0(round(percentage, 1), "%")
+  )
+
+##> plot pie-chart with percentage 
+ggplot(global_splice_pct, aes(x = "", y = percentage, fill = Splice_Event)) +
+  geom_col(width = 1) +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = label),
+            position = position_stack(vjust = 0.5),
+            size = 4) +
+  theme_void() +
+  labs(title = "Distribution of Splice Events over all patients")
 ```
 
