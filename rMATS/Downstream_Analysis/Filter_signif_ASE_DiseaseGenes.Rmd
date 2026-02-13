@@ -27,14 +27,13 @@ library(tibble)
 
 ```{r}
 
-#work_dir="/shared/projects/splicing_events_detection_rare_diseases/EPIS_SAV/rMATS/"
+#work_dir="/shared/projects/splicing_events_detection_rare_diseases/EPIS_SAV/rMATS/Downstream_Analysis/"
 
 work_dir="~/MYO_WORKSPACE/PROJECTS/EPIS_SAV-JohnRendu/rMATS/Downstream_Analysis/"
 setwd(work_dir)
 load(".RData")
 
-#downstream_outdir = paste0(work_dir,"Outputs/one_group_stat_off/Downstream_Outputs/")
-downstream_outdir = paste0(work_dir,"../Outputs/one_group_stat_off/Downstream_Outputs/")
+downstream_outdir <- paste0(work_dir,"Outputs/one_group_stat_off/Downstream_Outputs/")
 
 dir.create(downstream_outdir, showWarnings = F)
 
@@ -191,7 +190,7 @@ filter_ase_by_gene_and_stats <- function(rmats_dir, genetable, my_fdr=0.05, my_d
       ##         left_join() keeps all genes/splicing from ase_tab
       ##NOTE 2 : adding "Disease" didn't help in well filtering the ase-tables, so only simple filtering of genes
       
-      print(glue::glue("#{length(ase_tab.filt3$geneSymbol)} genes found associated to a disease,among the signif/ly spliced!\n"))
+      print(glue::glue("#{nrow(ase_tab.filt3)} events found associated to a disease-gene,among the signif/ly spliced!\n"))
       
       
       return(ase_tab.filt3)
@@ -228,10 +227,10 @@ for (rmats_dir in final_outdirs){
     
     print(ase_final.filt[1:4,1:6])
     
-    readr::write_delim(ase_final.filt,
-                      file=paste0(filtres_dir, "merged_filt_modif_ASE_sample",s,".txt"),
-                      delim = "\t",col_names=TRUE,
-                      append=FALSE)
+    # readr::write_delim(ase_final.filt,
+    #                   file=paste0(filtres_dir, "merged_filt_modif_ASE_sample",s,".txt"),
+    #                   delim = "\t",col_names=TRUE,
+    #                   append=FALSE)
      
 }
 
@@ -248,9 +247,12 @@ final_out_list <- list.files(filtres_dir, pattern="*.txt", full.names = TRUE)
 
 df_list <- map(final_out_list, ~read_delim(.x))
 
-names(df_list) <- samples
-resu
-write.xlsx(df_list, file=paste0(downstream_outdir,"KONTILI_InstitutMyologie_rMATS_final_lts_17patients.xlsx"))
+##>extract sample-names from .txt filenames to be accurate in the order of new table 
+sample_names <- map(final_out_list, ~sub(".*sample(.*)\\.txt", "\\1", .x) )
+
+names(df_list) <- sample_names  #--> will become sheets-names in Excel
+
+write.xlsx(df_list, file=paste0(downstream_outdir,"KONTILI_InstitutMyologie_rMATS_results_17patients_fdr0.05_dpsi0.2.xlsx"))
 
 
 ```
@@ -259,7 +261,7 @@ Count number of Splicing Events on final results --> Pie chart
 
 ```{r count_events_types }
 
-#read.xlsx(paste0(downstream_outdir,"KONTILI_InstitutMyologie_rMATS_final_results_17patients.xlsx"),sheet = names(df_list)??)
+#read.xlsx(paste0(downstream_outdir,"KONTILI_InstitutMyologie_rMATS_final_results_17patients.xlsx"))
 
 splice_events <- c("A3SS", "A5SS", "RI", "SE", "MXE")
 
