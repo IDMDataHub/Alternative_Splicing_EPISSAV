@@ -19,24 +19,24 @@ To start analysis with rMATS, two scripts are necessary:
 1. run_rmats_statoff_task_both.sh
 2. run_rmats_stats_1-vs-all.sbatch 
 
-The script #1 is run first and detects the splicing events for all samples, using as input the "input_bam/" files. 
-The output is directed to "output_all_statoff" folder.
+The first script detects the splicing events for all samples, using the "input_bam/" files. 
+The output is directed to "output_all_statoff/" folder.
 
-The 2nd script consists of the statistical analysis of the comparison between samples. 
-It uses the output of the first and creates a new folder (Stats_out/X_vs_all/).
-All samples are compared in this script, each one alone -vs- all others in consecutive commands.
+The second script consists of the statistical analysis of the comparison between samples.\ 
+It uses the output of the first and creates a new folder (Stats_out/X_vs_all/,where X is one sample).\
+All samples are compared, each -vs- all others in consecutive commands.
 
 
 ## Downstream Analysis
 
 
-The Downstream analysis is run with two scripts also: 
+The Downstream analysis is run with the following scripts: 
 
 1. manip_rMATS_output.Rmd : for merging the outputs of rMATS that are given per splicing-event.
 
 2. Filter_signif_ASE_DiseaseGenes.Rmd : for the filtering of results based on FDR, deltapsi and disease-genes
 
-For the filtering by disease-genes, a folder of "GeneTables_Bonne-Rivier/" is also used, but not published in this repository due to its size.
+For the filtering by disease-genes, a folder named "GeneTables_Bonne-Rivier/" is also used, but not published in this repository due to its size.
 
 It consists of multiple excel tables, one for each known disease.
 
