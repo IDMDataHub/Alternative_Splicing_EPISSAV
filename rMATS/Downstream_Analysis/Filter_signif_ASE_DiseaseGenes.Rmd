@@ -10,6 +10,13 @@ editor_options:
 
 Objective: Detect the A.S.E. with highest dPSI and lowest FDR, from the merged_ASE_FDR_sorted tables and also that fall over a muscle-disease gene (from published "gene-tables", Bonne & Rivier )
 
+```{r}
+
+rm(list = ls())  
+
+```
+
+
 ```{r setup_knitr}
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -33,9 +40,10 @@ library(tibble)
 
 #work_dir="/shared/projects/splicing_events_detection_rare_diseases/EPIS_SAV/rMATS/Downstream_Analysis/"
 
-work_dir="~/MYO_WORKSPACE/PROJECTS/EPIS_SAV-JohnRendu/rMATS/Downstream_Analysis/"
-setwd(work_dir)
-load(".RData")
+epissav_dir <- "~/MYO_WORKSPACE/PROJECTS/EPIS_SAV-JohnRendu/"
+work_dir   <- "~/MYO_WORKSPACE/PROJECTS/EPIS_SAV-JohnRendu/rMATS/Downstream_Analysis/"
+#setwd(work_dir)
+
 
 downstream_outdir <- paste0(work_dir,"Outputs/one_group_stat_off/Downstream_Outputs/")
 
@@ -58,7 +66,8 @@ samples <- c("4F","4G","44","45","47","K","L","M","N","P","Q","R","S","U","W","Y
 ```{r dir_filtered}
 
 ## create new folder to save filtered-rmats-results:
-filtres_dir <- paste0(downstream_outdir, "filt_by_dPSI_FDR_GeneTables/" ) 
+filtres_dir <- paste0(downstream_outdir, "filt_by_dPSI_FDR_GeneTables_030626/" ) 
+## filtres_dir <- paste0(downstream_outdir,"filt_by_dPSI_FDR_GeneTables/merged_filt_modif_ASE_tables") #-> before update
 
 dir.create(filtres_dir, showWarnings = FALSE)
 
@@ -95,7 +104,7 @@ for (s in samples) {
 
 ##1/ Read Tables and  add disease in a column --> merge tables to one
 
-gene_tables_dir <- paste0(work_dir,"../GeneTables_Bonne-Rivier/")
+gene_tables_dir <- paste0(epissav_dir,"GeneTables_Bonne-Rivier/")
 
 mu_genetables <- list.files(gene_tables_dir,pattern="\\.xlsx$", full.names = T)
 
@@ -132,13 +141,13 @@ read_gene_table <- function(genetable) {
 
 ```{r merge_genetables }
 
-##from chatGPT: 
+##from ChatGPT: 
 mrg_genetables <- purrr::map_dfr(mu_genetables, read_gene_table, .id = "SourceFile")
 
 ### Concatenate Diseases for each gene, to have unique Genes : 
 mrg_genetables_collapsed <- mrg_genetables %>%
-                              group_by("GeneSymbol") %>%
-                              summarise(Disease = paste(unique("Disease_name"), collapse = "; ")) %>%
+                              group_by(GeneSymbol) %>%
+                              summarise(Disease = paste(unique(Disease_name), collapse = "; ")) %>%
                               ungroup()
 
 ##write the merged-table in a file :
@@ -153,7 +162,9 @@ mrg_genetables_collapsed <- mrg_genetables %>%
 
 ---> Update 03/06/26:
 "Merged_GeneTables_collapsed_diseases_03-06-26.txt" was created, taking in account all mu_genetables.
+
 Some where not read, so ".txt" file contained only 36 genes/lines !
+
 New table of 03/06/26 contains 695 !
 
 
@@ -190,9 +201,7 @@ filter_ase_by_gene_and_stats <- function(rmats_dir, genetable, my_fdr=0.05, my_d
       
       ## Find Muscle-disease Genes (unique after collapsing) and keep Disease_name too :
       
-      ase_tab.filt3 <- ase_tab.filt2 %>% 
-                        dplyr::filter(geneSymbol %in% 
-                                    genetable[["GeneSymbol"]] )
+      ase_tab.filt3 <- ase_tab.filt2 %>% dplyr::filter(geneSymbol %in% genetable[["GeneSymbol"]] )
       
       # ase_tab.filt <- ase_tab %>% inner_join(genetable %>% 
       #                                         dplyr::select(GeneSymbol,Disease),
@@ -202,7 +211,7 @@ filter_ase_by_gene_and_stats <- function(rmats_dir, genetable, my_fdr=0.05, my_d
       ##         left_join() keeps all genes/splicing from ase_tab
       ##NOTE 2 : adding "Disease" didn't help in well filtering the ase-tables, so only simple filtering of genes
       
-      print(glue::glue("#{nrow(ase_tab.filt3)} events found associated to a disease-gene,among the signif/ly spliced!\n"))
+      print(glue::glue("#{length(ase_tab.filt3$geneSymbol)} events found associated to a disease-gene,among the signif/ly spliced!\n"))
       
       
       return(ase_tab.filt3)
@@ -214,25 +223,20 @@ filter_ase_by_gene_and_stats <- function(rmats_dir, genetable, my_fdr=0.05, my_d
 
 ```{r call_function}
 
-## create new folder to save filtered-rmats-results:
-
-filtres_dir <- paste0(downstream_outdir, "filt_by_dPSI_FDR_GeneTables_030626/" ) 
-## filtres_dir <- paste0(downstream_outdir,"filt_by_dPSI_FDR_GeneTables/merged_filt_modif_ASE_tables") #-> before update
-
-dir.create(filtres_dir,showWarnings = F)
 
 # folder from rmats-downstream with merged-splice_events:
 final_outdirs <- list.files(paste0(downstream_outdir,"final_rmats_merged/"), 
                             pattern="final_*", 
                             full.names = TRUE)
 
+mydpsi_co = 0.5 
+
 for (rmats_dir in final_outdirs){
   
-    s <-  sub("_vs_all","",sub("final_", "",basename(rmats_dir)) )
     ase_final.filt <- filter_ase_by_gene_and_stats(rmats_dir, 
                                                    mrg_genetables_collapsed,
                                                    my_fdr = 0.05, 
-                                                   my_dpsi = 0.5)
+                                                   my_dpsi = mydpsi_co )
     
     ##> Ignore the Disease,bcs genes resting, are 0 or very few with inner/left_join
     ## ase_final.filt  <- ase_final.filt %>% dplyr::relocate(c("Disease"), .before=c("chr"))
@@ -248,6 +252,7 @@ for (rmats_dir in final_outdirs){
     
     print(ase_final.filt[1:4,1:6])
     
+    s <-  sub("_vs_all","",sub("final_", "",basename(rmats_dir)) )
     # readr::write_delim(ase_final.filt,
     #                   file=paste0(filtres_dir, "merged_filt-mu-genetable_sample",s,".txt"),
     #                   delim = "\t",col_names=TRUE,
@@ -267,7 +272,8 @@ library(openxlsx)
 # filtres_dir = "filt_by_dPSI_FDR_GeneTables_030626/"
 final_out_list <- list.files(filtres_dir, pattern="*.txt", full.names = TRUE)
 
-df_list <- map(final_out_list, ~read_delim(.x))
+#> final rmats-results after filtering with GeneTables:
+df_list <- map(final_out_list, ~read_delim(.x, show_col_types = F))
 
 ##>extract sample-names from .txt filenames to be accurate in the order of new table 
 sample_names <- map(final_out_list, ~sub(".*sample(.*)\\.txt", "\\1", .x) )
@@ -323,13 +329,6 @@ global_splice_sum <- splice_types_sum  %>%
 # 5 MXE                   106
 
 
-##> Pie Chart : 
-#---> old function:
-# pie(global_splice_sum$Total_Number,
-#     labels=global_splice_sum$Splice_Event,
-#     main="Distribution of Splicing Events")
-
-##---> new 
 
 ggplot(global_splice_sum, 
        aes(x = "", 
@@ -357,6 +356,17 @@ global_splice_pct <- global_splice_sum  %>%
                         percentage = Total_Number / sum(Total_Number) * 100,
                         label = paste0(round(percentage, 1), "%","(",Total_Number ,")")
                       )
+
+
+global_splice_pct
+# # A tibble: 5 × 4
+#   Splice_Event Total_Number percentage label     
+#   <fct>               <int>      <dbl> <chr>     
+# 1 A3SS                   32       6.93 6.9%(32)  
+# 2 A5SS                   32       6.93 6.9%(32)  
+# 3 RI                     61      13.2  13.2%(61) 
+# 4 SE                    231      50    50%(231)  
+# 5 MXE                   106      22.9  22.9%(106)
 
 
 ggplot(global_splice_pct, 
@@ -395,7 +405,7 @@ p2 <- ggplot(global_splice_pct, aes(x = "", y = percentage, fill=Splice_Event ))
                           guide="none") +     #guide: for legend of "event_type"
         labs(
             title    = "rMATS-Splicing Events [All samples]",
-            subtitle = paste("Total events:", scales::comma(sum(global_splice_pct$Total_Number))),
+            subtitle = glue::glue("Total events: {sum(global_splice_pct$Total_Number)} (|dpsi|>{mydpsi_co})"),
             fill     = "Splice_Event") +
         theme(
               panel.background = element_blank(),
