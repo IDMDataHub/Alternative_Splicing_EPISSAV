@@ -10,9 +10,13 @@ editor_options:
 
 Objective: Detect the A.S.E. with highest dPSI and lowest FDR, from the merged_ASE_FDR_sorted tables and also that fall over a muscle-disease gene (from published "gene-tables", Bonne & Rivier )
 
-```{r setup, include=FALSE}
-
+```{r setup_knitr}
 knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r call_libraries, include=FALSE}
+
 suppressPackageStartupMessages(library(tidyverse))
 suppressPackageStartupMessages(library(dplyr))
 suppressPackageStartupMessages(library(glue))
@@ -27,8 +31,9 @@ library(tibble)
 
 ```{r}
 
+#work_dir="/shared/projects/splicing_events_detection_rare_diseases/EPIS_SAV/rMATS/Downstream_Analysis/"
 
-work_dir="~/MYO_WORKSPACE/PROJECTS/EPIS_SAV/rMATS/Downstream_Analysis/"
+work_dir="~/MYO_WORKSPACE/PROJECTS/EPIS_SAV-JohnRendu/rMATS/Downstream_Analysis/"
 setwd(work_dir)
 load(".RData")
 
@@ -92,13 +97,13 @@ for (s in samples) {
 
 gene_tables_dir <- paste0(work_dir,"../GeneTables_Bonne-Rivier/")
 
-mu_genetables <- list.files(gene_tables_dir, full.names = T)
+mu_genetables <- list.files(gene_tables_dir,pattern="\\.xlsx$", full.names = T)
 
 # names(mu_genetables) <- basename(mu_genetables) 
 #--> to be used if map_(.id="SourceFile") for detecting where each line of gene comes from
 ## not needed since I added column of disease 
 
-diseases <- purrr::map_chr( mu_genetables, \(x) sub(".xlsx","", basename(x)) )
+## diseases <- purrr::map_chr( mu_genetables, \(x) sub(".xlsx","", basename(x)) )
 
 
 read_gene_table <- function(genetable) {
@@ -127,30 +132,36 @@ read_gene_table <- function(genetable) {
 
 ```{r merge_genetables }
 
-
+##from chatGPT: 
 mrg_genetables <- purrr::map_dfr(mu_genetables, read_gene_table, .id = "SourceFile")
 
 ### Concatenate Diseases for each gene, to have unique Genes : 
 mrg_genetables_collapsed <- mrg_genetables %>%
-                              group_by(GeneSymbol) %>%
-                              summarise(Disease = paste(unique(Disease_name), collapse = "; ")) %>%
+                              group_by("GeneSymbol") %>%
+                              summarise(Disease = paste(unique("Disease_name"), collapse = "; ")) %>%
                               ungroup()
 
 ##write the merged-table in a file :
-readr::write_delim(mrg_genetables_collapsed,
-                   file = paste0(gene_tables_dir,"Merged_GeneTables_collapsed_diseases.txt"),
-                   delim = "\t",
-                   col_names = TRUE,
-                   na = "NA")
-                  
+# readr::write_delim(mrg_genetables_collapsed,
+#                    file = paste0(gene_tables_dir,"Merged_GeneTables_collapsed_diseases_03-06-26.txt"),
+#                    delim = "\t",
+#                    col_names = TRUE,
+#                    na = "NA")
+#                   
 
 ```
 
-### Filter dy dPSI & FDR after chosing the disease-genes 
+---> Update 03/06/26:
+"Merged_GeneTables_collapsed_diseases_03-06-26.txt" was created, taking in account all mu_genetables.
+Some where not read, so ".txt" file contained only 36 genes/lines !
+New table of 03/06/26 contains 695 !
+
+
+#### Filter dy dPSI & FDR after chosing the disease-genes 
 
 Better calibration of output-genes when each filter is applied one by one and disease-genes at the end.
 
-```{r}
+```{r filter_by_mu-genes_and_stat_function}
 
 filter_ase_by_gene_and_stats <- function(rmats_dir, genetable, my_fdr=0.05, my_dpsi= 0.5){
   
@@ -179,7 +190,9 @@ filter_ase_by_gene_and_stats <- function(rmats_dir, genetable, my_fdr=0.05, my_d
       
       ## Find Muscle-disease Genes (unique after collapsing) and keep Disease_name too :
       
-      ase_tab.filt3 <- ase_tab.filt2 %>% filter(geneSymbol %in% mrg_genetables$GeneSymbol )
+      ase_tab.filt3 <- ase_tab.filt2 %>% 
+                        dplyr::filter(geneSymbol %in% 
+                                    genetable[["GeneSymbol"]] )
       
       # ase_tab.filt <- ase_tab %>% inner_join(genetable %>% 
       #                                         dplyr::select(GeneSymbol,Disease),
@@ -203,31 +216,40 @@ filter_ase_by_gene_and_stats <- function(rmats_dir, genetable, my_fdr=0.05, my_d
 
 ## create new folder to save filtered-rmats-results:
 
-filtres_dir <- paste0(downstream_outdir, "filt_by_dPSI_FDR_GeneTables/" ) ## and Disease-Gene! 
+filtres_dir <- paste0(downstream_outdir, "filt_by_dPSI_FDR_GeneTables_030626/" ) 
+## filtres_dir <- paste0(downstream_outdir,"filt_by_dPSI_FDR_GeneTables/merged_filt_modif_ASE_tables") #-> before update
 
-final_outdirs <- list.files(paste0(downstream_outdir,"final_rmats_merged/"), pattern="final_*", full.names = TRUE)
+dir.create(filtres_dir,showWarnings = F)
 
+# folder from rmats-downstream with merged-splice_events:
+final_outdirs <- list.files(paste0(downstream_outdir,"final_rmats_merged/"), 
+                            pattern="final_*", 
+                            full.names = TRUE)
 
 for (rmats_dir in final_outdirs){
   
     s <-  sub("_vs_all","",sub("final_", "",basename(rmats_dir)) )
-    ase_final.filt <- filter_ase_by_gene_and_stats(rmats_dir, mrg_genetables_collapsed,
-                                                   my_fdr = 0.05, my_dpsi = 0.2)
+    ase_final.filt <- filter_ase_by_gene_and_stats(rmats_dir, 
+                                                   mrg_genetables_collapsed,
+                                                   my_fdr = 0.05, 
+                                                   my_dpsi = 0.5)
     
     ##> Ignore the Disease,bcs genes resting, are 0 or very few with inner/left_join
     ## ase_final.filt  <- ase_final.filt %>% dplyr::relocate(c("Disease"), .before=c("chr"))
     
-    
-    ase_final.filt  <- ase_final.filt %>% dplyr::relocate(c("alternative_exon_coordinates","PValue", "FDR","dPSI"),
-                                                          .before=c("IncFormLen"))
+    ase_final.filt  <- ase_final.filt %>% 
+                        dplyr::relocate(c("alternative_exon_coordinates",
+                                          "PValue", "FDR","dPSI"),
+                                          .before=c("IncFormLen"))
 
     ## remove non-necessary columns:
-    ase_final.filt <- ase_final.filt %>% dplyr::select(- c(matches("IncLevel*"),"RowID"))
+    ase_final.filt <- ase_final.filt %>% 
+                        dplyr::select(- c(matches("IncLevel*"),"RowID"))
     
     print(ase_final.filt[1:4,1:6])
     
     # readr::write_delim(ase_final.filt,
-    #                   file=paste0(filtres_dir, "merged_filt_modif_ASE_sample",s,".txt"),
+    #                   file=paste0(filtres_dir, "merged_filt-mu-genetable_sample",s,".txt"),
     #                   delim = "\t",col_names=TRUE,
     #                   append=FALSE)
      
@@ -236,12 +258,13 @@ for (rmats_dir in final_outdirs){
 
 ```
 
-Save all txt in Excel 
+#### Save all txt in Excel 
 
 ```{r save_in_excel}
 
 library(openxlsx)
 
+# filtres_dir = "filt_by_dPSI_FDR_GeneTables_030626/"
 final_out_list <- list.files(filtres_dir, pattern="*.txt", full.names = TRUE)
 
 df_list <- map(final_out_list, ~read_delim(.x))
@@ -251,7 +274,9 @@ sample_names <- map(final_out_list, ~sub(".*sample(.*)\\.txt", "\\1", .x) )
 
 names(df_list) <- sample_names  #--> will become sheets-names in Excel
 
-write.xlsx(df_list, file=paste0(downstream_outdir,"KONTILI_InstitutMyologie_rMATS_results_17patients_fdr0.05_dpsi0.2.xlsx"))
+# write.xlsx(df_list,
+#            file=paste0(filtres_dir,
+#             "../KONTILI_InstitutMyologie_rMATS_results_17patients_fdr0.05_dpsi0.5_maj030626.xlsx"))
 
 
 ```
@@ -279,25 +304,46 @@ splice_types_sum <- imap(df_list,  # maps over each element and keeps name
 library(dplyr)
 library(purrr)
 
-global_splice_sum <- splice_types_sum |>
-                      bind_rows(.id = "sample_name") |>
-                      group_by(Splice_Event) |> 
+global_splice_sum <- splice_types_sum  %>% 
+                      bind_rows(.id = "sample_name") %>% 
+                      group_by(Splice_Event) %>%  
                       summarise(Total_Number = sum(Frequency, na.rm = TRUE),.groups = "drop")
                       
                       
-library(ggplot2)
-library(dplyr)
 
-ggplot(global_splice_sum, aes(x = "", y = Total_Number, fill = Splice_Event)) +
-  geom_col(width = 1) +
-  coord_polar(theta = "y") +
-  geom_text(aes(label=Total_Number), 
-            position = position_stack(vjust = 0.5),
-            size = 4)+
-  labs(
-    title = "Distribution of Splice Events over all patients",
-    fill = "Splice Event") +
-  theme_void()
+
+# global_splice_sum [update 03/06/2026]
+# # A tibble: 5 × 2
+#   Splice_Event Total_Number
+#   <fct>               <int>
+# 1 A3SS                   32
+# 2 A5SS                   32
+# 3 RI                     61
+# 4 SE                    231
+# 5 MXE                   106
+
+
+##> Pie Chart : 
+#---> old function:
+# pie(global_splice_sum$Total_Number,
+#     labels=global_splice_sum$Splice_Event,
+#     main="Distribution of Splicing Events")
+
+##---> new 
+
+ggplot(global_splice_sum, 
+       aes(x = "", 
+           y = Total_Number, 
+           fill = Splice_Event)) +
+      geom_col(width = 1) +
+      coord_polar(theta = "y") +
+      geom_text(aes(label=Total_Number), 
+                position = position_stack(vjust = 0.5),
+                size = 4) +
+      labs(
+        title = "Distribution of Splice Events over all patients",
+        fill = "Splice Event") +
+      theme_void()
 
 ```
 
@@ -305,15 +351,18 @@ Show Pie Chart with Percentages
 
 ```{r add_percentage_in_sums}
 
-#> add column to final tibble: 
-global_splice_pct <- global_splice_sum |>
-  mutate(
-    percentage = Total_Number / sum(Total_Number) * 100,
-    label = paste0(round(percentage, 1), "%")
-  )
+#> add column of "%" to final tibble: 
+global_splice_pct <- global_splice_sum  %>% 
+                      mutate(
+                        percentage = Total_Number / sum(Total_Number) * 100,
+                        label = paste0(round(percentage, 1), "%","(",Total_Number ,")")
+                      )
 
-##> plot pie-chart with percentage 
-ggplot(global_splice_pct, aes(x = "", y = percentage, fill = Splice_Event)) +
+
+ggplot(global_splice_pct, 
+       aes(x = "", 
+           y = percentage, 
+           fill = Splice_Event)) +
   geom_col(width = 1) +
   coord_polar(theta = "y") +
   geom_text(aes(label = label),
@@ -321,5 +370,51 @@ ggplot(global_splice_pct, aes(x = "", y = percentage, fill = Splice_Event)) +
             size = 4) +
   theme_void() +
   labs(title = "Distribution of Splice Events over all patients")
+
+```
+
+
+
+```{r new_version_ggplot_as_majiq}
+
+library(geomtextpath)
+
+events_colours <- c( "A5SS"  = "#FFC125",
+                     "A3SS"  = "#FFEFDB",
+                     "SE"    = "#FF7256",
+                     "RI"    = "#1C86EE",
+                     "MXE"   = "#ADD8E6"
+                     )
+
+
+p2 <- ggplot(global_splice_pct, aes(x = "", y = percentage, fill=Splice_Event )) +
+        geom_col(width = 1, stat="identity", colour = "white", linewidth = 0.4) +
+        coord_polar(theta = "y", start=0) +
+        scale_fill_manual(values = events_colours,
+                          na.value = "grey70",
+                          guide="none") +     #guide: for legend of "event_type"
+        labs(
+            title    = "rMATS-Splicing Events [All samples]",
+            subtitle = paste("Total events:", scales::comma(sum(global_splice_pct$Total_Number))),
+            fill     = "Splice_Event") +
+        theme(
+              panel.background = element_blank(),
+              plot.background = element_blank(),
+              axis.text = element_blank(),
+              axis.ticks = element_blank()) +
+        # Percentage text INSIDE the slices
+        geom_text(aes(x = 0.95, label = paste0(round(percentage, 1), "%")),
+                  position = position_stack(vjust = 0.5),
+                  size = 4,
+                  colour = "#030303",
+                  fontface = "bold") +
+        geom_labelpath(data = global_splice_pct,
+                       position = position_stack(vjust = 0.5),
+                        aes(x = 1.6, y = percentage, label = Splice_Event),
+                        size = 3,
+                        show.legend = FALSE); 
+
+p2
+
 ```
 
