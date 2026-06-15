@@ -1,0 +1,884 @@
+---
+title: "Comparison of splicing events of MAJIQ with rMATS"
+author: "Maria Kondili"
+date: "2026-05-27"
+header-includes:
+  - \usepackage{fvextra} 
+  - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines=TRUE,commandchars=\\\{\}}
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r clean_env }
+
+rm(list = ls())  
+
+```
+
+```{r chunk_options, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE,       # FALSE: no code will be shown in html/pdf report
+                      eval = TRUE,
+                      fig.dim = c(10,7),  # for larger space for a graph
+                      pillar.sigfig = 5,  # number of decimals to show from a tibble
+                      tidy.opts=list(width.cutoff=70),
+                      tidy=TRUE) #wrap long-messages in two-lines
+                    
+```
+
+
+```{r libs}
+library(tidyverse)
+library(dplyr)
+library(purrr)
+```
+
+
+```{r dirs}
+epissav_dir <- "~/MYO_WORKSPACE/PROJECTS/EPIS_SAV-JohnRendu/"
+majiq_wsp <- paste0(epissav_dir,"MAJIQ/")
+work_dir <- paste0(majiq_wsp,"Scripts/R_dowstream/")
+#setwd(work_dir)
+
+```
+
+#### MAJIQ-results (merged_tables)
+
+```{r read_majiq_res}
+
+modulizer_dir <- paste0(majiq_wsp ,"majiq_wsp/modulizer/changing_dpsi_0.3/")
+
+majiq_mrg_dir <- paste0(modulizer_dir,"Merged/")
+
+samples <- list.files(modulizer_dir, pattern="C00*")
+
+majiq_mrg_filenames <- list.files(majiq_mrg_dir,full.names = T)
+
+majiq_mrg_tables <-  map(majiq_mrg_filenames, ~read_delim(.x, delim="\t",
+                                                          show_col_types = F,
+                                                          col_names = TRUE)
+                         )
+
+## use the filenames as sample-names for the list of tables 
+names(majiq_mrg_tables) <- str_remove(list.files(majiq_mrg_dir),".tsv")
+
+
+mjq.num_rows_before_filt <- tibble( sample = names(majiq_mrg_tables), 
+                                    num_rows = unlist(map(majiq_mrg_tables, ~nrow(.x))) )
+
+cat("Nb of rows per sample, before filtering:")
+mjq.num_rows_before_filt 
+
+```
+
+> Filter Majiq-results, |gr2-gr1_median_deltapsi| > 0.3 
+
+```{r filter_majiq_mrg_tables }
+
+majiq_dpsi_co <- 0.3
+
+majiq_mrg_tables.filt <-  map(majiq_mrg_filenames, ~read_delim(.x, delim="\t",
+                                                          show_col_types = F,
+                                                          col_names = TRUE) %>% 
+                                dplyr::filter( abs(`grp2-grp1_median_dpsi`) > majiq_dpsi_co )
+                         )
+
+## give names to list:
+names(majiq_mrg_tables.filt) <- names(majiq_mrg_tables)
+
+mjq.num_rows_after_filt <- tibble( sample = names(majiq_mrg_tables), 
+                                  num_rows = unlist(map(majiq_mrg_tables.filt, ~nrow(.x)) ) )
+
+cat("Nb of rows per sample, after filtering:")
+mjq.num_rows_after_filt
+
+```
+
+#### rMATS-results (merged-tables)
+
+```{r rmats_dir}
+
+rmats_dir <- paste0(epissav_dir,"rMATS/Downstream_Analysis/Outputs/one_group_stat_off/Downstream_Outputs/final_rmats_merged/only_merged_tables/")
+
+```
+
+> Read symlinks of files from rmats
+
+```{r resolve_symlinks_rmats}
+
+## Resolve the shortcut: 
+#--- FUNCTION-----#
+resolve_lnk <- function(filepath) {
+            system2("powershell", 
+                    args = c("-command",sprintf(
+                    "(New-Object -ComObject WScript.Shell).CreateShortcut('%s').TargetPath",
+                    normalizePath(filepath) )),
+            stdout = TRUE )
+}
+
+## to be able to read it :
+# target <- resolve_link(symlink_file)
+# df <- read_delim(target, delim = "\t")
+
+
+```
+
+
+```{r rmats_tables }
+
+## Capture real files from symlink
+shortcuts <- list.files(rmats_dir, pattern="- Shortcut.lnk", full.names = TRUE)
+
+rmats_mrg_filenames <- map(shortcuts, ~resolve_lnk(.x) )
+
+rmats_mrg_tables   <-  map(rmats_mrg_filenames, ~read_delim(.x, delim="\t",
+                                                          show_col_types = F,
+                                                          col_names = TRUE)
+                         )
+
+mrg_filenames <- unlist(map(rmats_mrg_filenames, ~basename(path = .x[[1]]) ))
+
+
+## Give names to list: from "merged_modif_ASE_sample44_FDRsorted.tsv"--> extract "sample44" 
+names(rmats_mrg_tables) <- c(substr(mrg_filenames[1:5], start=18,stop=25),
+                             substr(mrg_filenames[6:17],start=18,stop=24) )
+
+```
+
+> Rename rmats-samples to match MAJIQ-sample_names
+
+```{r}
+
+names(rmats_mrg_tables) <- c("C002I44","C002I45","C002I47","C002I4F", "C002I4G",
+                             "C002I3K", "C002I3L","C002I3M","C002I3N","C002I3P","C002I3Q",
+                             "C002I3R", "C002I3S","C002I3U","C002I3W","C002I3Y","C002I3Z")
+
+samples.rmats <- names(rmats_mrg_tables) 
+```
+
+> Filter rMATS : |dPSI| > 0.5 & FDR <= 0.05
+
+```{r filter_rmats}
+
+rmats_dpsi_co <-  0.5
+
+
+## Rows before: 
+num_rows_before_filt <- tibble( sample = samples.rmats, 
+                                num_rows= unlist(map(rmats_mrg_tables, ~nrow(.x))) )
+
+
+### Filter by dPSI :
+rmats_mrg_tables.filt   <-  map(rmats_mrg_filenames, ~read_delim(.x, delim="\t",
+                                                            show_col_types = F,
+                                                            col_names = TRUE)  %>% 
+                                  dplyr::filter(abs(dPSI) > rmats_dpsi_co & FDR <= 0.05 )
+)
+
+names(rmats_mrg_tables.filt) <- samples.rmats
+
+## Rows after: 
+num_rows_after_filt <- tibble( sample = samples.rmats, 
+                               num_rows = unlist(map(rmats_mrg_tables.filt, ~nrow(.x))) )
+
+
+```
+
+#### Compare Events rmats/majiq
+
+> Find common genes 
+
+```{r names_common_genes }
+
+find_common_genes <- function(rmats_tab, majiq_tab,sample_name) {
+
+    #' Read rmats_tab[[sample]]$geneSymbol &
+    #' majiq_tab[[sample]]$gene_name
+    #' and intersect 
+    cat("Sample:")
+    print(sample_name)
+    
+    ##> TABLE_1
+    rmats_genes <- rmats_tab[[sample_name]] %>%
+                    pull(geneSymbol) %>%
+                    unique() %>%
+                    na.omit()
+    
+    print(rmats_genes[1:5])
+    
+    ## TABLE_2
+    majiq_genes <- majiq_tab[[sample_name]] %>%
+                    pull(gene_name) %>%
+                    unique() %>%
+                    na.omit()
+    
+    print(majiq_genes[1:5])
+    
+    common_genes <- intersect(rmats_genes, majiq_genes)
+    return(common_genes)
+}
+
+# Find common genes for each sample
+common_genes <- map(names(majiq_mrg_tables), 
+                    ~find_common_genes( rmats_mrg_tables.filt,
+                                        majiq_mrg_tables.filt,
+                                        .x))
+
+common_genes <- common_genes %>% set_names(names(majiq_mrg_tables))
+
+```
+
+> Save common-genes in file
+
+```{r common_genes_in_file}
+
+common_genes_outfile = glue::glue("Comparison_with_rMATS/Common_genes_rmats(dpsi={rmats_dpsi_co})-vs-majiq(dpsi={majiq_dpsi_co}).txt")
+
+sink(common_genes_outfile)
+  iwalk(common_genes, ~{
+                        cat("###", .y, "\n") # sample
+                        cat(.x, sep = "\n") # gene-names
+                        cat("\n")
+  })
+sink()
+
+
+if (file.exists(common_genes_outfile)) {
+  print( glue::glue("File saved in file: {common_genes_outfile}"))
+}
+
+```
+
+
+```{r test_common_genes_function,echo=F,eval=F }
+## TEST:
+
+for (s in samples.rmats) {
+  
+   majiq_genes <- majiq_mrg_tables.filt[[s]] %>%
+        pull(gene_name) %>%
+        unique() %>%
+        na.omit()
+   
+  print(majiq_genes)
+  
+  rmats_genes <- rmats_mrg_tables[[s]] %>%
+        pull(geneSymbol) %>%
+        unique() %>%
+        na.omit()
+  
+  print(rmats_genes)
+}
+
+```
+
+
+```{r count_common_genes}
+
+
+common_genes_counts <- tibble(sample = names(majiq_mrg_tables),
+                              Nb_common = map_int(sample, ~length(common_genes[[.x]]) )
+                              )
+
+```
+
+```{r write_down_results }
+
+outdir <- "Comparison_with_rMATS/"
+dir.create(outdir, showWarnings = FALSE)
+
+readr::write_delim(common_genes_counts, 
+                   file = paste0(outdir, "Table_common_genes_per_sample_after_filt.tsv"),
+                   delim = "\t",append = FALSE)
+
+```
+
+#### Create VENN for showing common genes 
+
+```{r plot_venn}
+
+## developed with help by Claude-AI
+
+library(ggVennDiagram)
+library(purrr)
+library(dplyr)
+
+
+plot_venn_sample <- function( rmats_tab,majiq_tab, sample_name) {
+  
+  gene_list <- list(
+                rMATS = rmats_tab[[sample_name]] %>%
+                          pull(geneSymbol) %>% 
+                          unique() %>% 
+                          na.omit() %>% 
+                          as.character(),
+                MAJIQ = majiq_tab[[sample_name]] %>%
+                          pull(gene_name) %>% 
+                          unique() %>% 
+                          na.omit() %>% 
+                          as.character()
+  )
+  
+  ggVennDiagram(gene_list,
+                label        = "both",   # "both":shows count + percent
+                label_alpha  = 0,
+                label_size   = 5, #<-- percentage/count inside circle
+                set_size     = 4, #<-- group(set)-label
+                edge_size    = 0.5) +
+    scale_fill_gradient(low = "#FFE4C4", high =  "#98F5FF") + 
+    labs(title = paste0("Spliced Genes detected — ", sample_name)) +
+    theme(legend.position = "none",
+          plot.title = element_text(hjust = 0.5, size = 13),
+          plot.margin= margin(1,1,1,1))
+    
+   
+}
+
+
+venn_plots <- map(names(majiq_mrg_tables.filt), 
+                  ~plot_venn_sample(rmats_mrg_tables.filt,
+                                    majiq_mrg_tables.filt,
+                                    .x))
+
+# wrap_plots(venn_plots, ncol = 3) +
+#   plot_annotation(
+#     title = "rMATS vs MAJIQ — Common Spliced genes per sample",
+#     theme = theme(plot.title = element_text(hjust = 0.5, 
+#                   size = 12, face = "bold"))
+#    )                  
+#     
+
+##----- Save with walk2 (multiple pngs) ------: 
+# walk2(
+#     venn_plots,
+#     names(venn_plots),
+#     ~ggsave(
+#         filename = paste0(.y, "_venn_genes.png"),
+#         plot = .x,
+#         width = 6,
+#         height = 5,
+#         dpi = 300
+#     )
+# )
+
+
+##-----show in Console ------- 
+for (p in venn_plots){
+      print(p)
+}
+
+##----- save in pdf ----------:
+pdf(glue::glue("Comparison_with_rMATS/ggVennDiagrams_rMATS-filt_dpsi={rmats_dpsi_co}-vs-MAJIQ-filt_dpsi={majiq_dpsi_co}_onGenes_per_sample.pdf"),
+    onefile = TRUE)
+    for (p in venn_plots){
+      print(p)
+    }
+dev.off()
+
+
+```
+
+####  Overlap MAJIQ-results (dpsi-filt) with  Muscle-Gene-Tables( Bonne,Rivier )
+
+```{r overlap_with_muscle-genes-table}
+
+## Read table with Genes per Disease: 
+gene_tables_dir <- paste0(epissav_dir,"GeneTables_Bonne-Rivier/")
+
+mrg_genetables_collapsed <- readr::read_delim(file =
+                                          paste0(gene_tables_dir,
+                                          "Merged_GeneTables_collapsed_diseases_03-06-26.txt"),
+                                          delim = "\t",
+                                          col_names = TRUE,
+                                          na = "NA")
+
+## Filter by GeneTable : 
+majiq_tabs.filt_muscle_genes <- map(majiq_mrg_tables.filt, 
+                                    ~(.x %>%  dplyr::filter(gene_name %in%
+                                                           mrg_genetables_collapsed$GeneSymbol)))
+
+##> Show genes per majiq_table: 
+majiq_muscle_genes_per_sample <- map(majiq_tabs.filt_muscle_genes, 
+                                     ~(unique(.x[["gene_name"]])) 
+                                     )
+
+## concatenate gene-names:
+muscle_gene_names_in_majiq <- map(majiq_muscle_genes_per_sample, 
+                                  ~ paste(.x,collapse=", ")  
+                                  )
+samples_of_muscle_gene_names <- names(muscle_gene_names_in_majiq)
+muscle_gene_names_in_majiq <- unlist(muscle_gene_names_in_majiq)
+
+
+muscle_gene_names_in_majiq.df <- tibble( "Sample" = samples_of_muscle_gene_names,
+                                         "Gene_names" = muscle_gene_names_in_majiq)
+
+
+cat("Muscle-Disease-Genes found in Majiq-spliced results,after dpsi-filtering :\n")
+print(muscle_gene_names_in_majiq.df)
+
+write_delim(muscle_gene_names_in_majiq.df,
+            file="Muscle_Genes_in_Majiq_Results_per_sample.txt",
+            delim="\t",
+            col_names=T,
+            na="NA")
+
+```
+
+#### MAJIQ:: Pie-Chart with frequency of Splicing-Types 
+
+```{r splice_events_and_colours}
+
+splice_events.mj <- c("alt3prime",
+                      "alt5prime",
+                      "alternate_first_exon",
+                      "alternate_last_exon",
+                      "alternative_intron",
+                      "cassette",
+                      "heatmap",
+                      "junctions",
+                      "multi_exon_spanning",
+                      "mutually_exclusive",
+                      "orphan_junction",
+                      "p_alt3prime",
+                      "p_alt5prime",
+                      "p_alternate_first_exon",
+                      "p_alternate_last_exon",
+                      "tandem_cassette" )
+
+##> create Colors-vector by : r-charts.com/colors/
+my_events_colours <- c(
+                  "alt3prime"              = "#FF1493",
+                  "alt5prime"              = "#8B0A50",
+                  "alternate_first_exon"   = "#7FFF00",
+                  "alternate_last_exon"    = "#A2CD5A",
+                  "alternative_intron"     = "#FFF0F5",
+                  "cassette"               = "#E15759",
+                  "heatmap"                = "#2F4F4F",
+                  "junctions"              = "#1C86EE",
+                  "multi_exon_spanning"    = "#F28E2B",
+                  "mutually_exclusive"     = "#00EEEE",
+                  "orphan_junction"        = "#9932CC",
+                  "p_alt3prime"            = "#59A14F",
+                  "p_alt5prime"            = "#FF3030",
+                  "p_alternate_first_exon" = "#9BCD9B",
+                  "p_alternate_last_exon"  = "#FFD700",
+                  "tandem_cassette"        = "#EEE685" )
+
+```
+
+> for all samples, all splice-types of MAJIQ
+
+```{r pie_chart_all_splice_types }
+
+splice_types_sum.mj <- imap(majiq_mrg_tables,  
+                                  \(sample_tab, sample_name) {
+                                    df_se <- data.frame(t(table(factor(sample_tab$event_type))))
+                                    colnames(df_se) <- c("Var1","Event_Type","Frequency")
+                                    df_se <- df_se %>% select(-"Var1") 
+                                    df_se
+                                    ##! must always print the value to be exported outside imap!
+                                  })
+                                  
+##> Sum over all samples : 
+global_splice_sum.mj <- splice_types_sum.mj  %>% 
+                      bind_rows(.id = "sample_name") %>% 
+                      group_by(Event_Type) %>%  
+                      summarise(Total_Number = sum(Frequency, na.rm = TRUE),.groups = "drop")
+      
+write_delim(global_splice_sum.mj,
+        file="SpliceTypes_piecharts/Global_EventTypes_Sum_MAJIQ.txt",
+        delim="\t",
+        na="NA",
+        col_names = TRUE)
+
+event_types <- levels(as.factor(global_splice_sum.mj$Event_Type ))
+
+
+global_splice_pct.mj <- global_splice_sum.mj  %>% 
+                        mutate(
+                          Percentage = Total_Number / sum(Total_Number) * 100,
+                          label = paste0(round(Percentage, 1), "%","(",Total_Number ,")")
+                          )
+
+## Use a Palette to cover all events and be flexible for different number of slices in piechart
+library(geomtextpath)
+
+  
+##> Visualise and label :
+p <- ggplot(global_splice_pct.mj, aes(x = "", y = Total_Number, fill=Event_Type )) +
+            geom_col(width = 1, stat="identity",colour = "white", linewidth = 0.4) +
+            coord_polar(theta = "y", start=0) +
+            scale_fill_manual(values = my_events_colours,
+                          na.value = "grey70",
+                          guide="none") +     #guide: for legend of "event_type"
+        labs(
+            title    = glue::glue(" MAJIQ-Event Types [All samples]"),
+            subtitle = paste("Total events:", 
+                      scales::comma(sum(global_splice_sum.mj$Total_Number))),
+            fill     = "Event_Type") +
+        theme(
+              panel.background = element_blank(),
+              plot.background = element_blank(),
+              axis.text = element_blank(),
+              axis.ticks = element_blank()) +
+        # Percentage text 
+        geom_text(aes(x = 1.2, label = paste0(round(Percentage, 1), "%")),
+                  position = position_stack(vjust = 0.5),
+                  size = 3.5,
+                  colour = "#370335",
+                  fontface = "bold") +
+        # Labels text 
+        geom_labelpath(data = global_splice_pct.mj,
+                       position = position_stack(vjust = 0.5),
+                        aes(x = 1.6, y = Total_Number, label = Event_Type),
+                        size = 3.2,
+                        colour = "#370335",
+                        show.legend = FALSE); 
+
+p
+
+```
+
+
+> Write a FUNCTION for Count + PieChart  -> MAJIQ & rMATS 
+
+#### Regroup Splicing-Types to have only the basic splicing-events, comparable to rMATS-events 
+
+-  Doc_MAJIQ : 
+https://biociphers.bitbucket.io/majiq-docs/modulizer/event-types.html#putative-alternative-splice-sites-p-alt-5-3
+
+ * "p_alt5prime"  | "alt5prime" | "alternate_first_exon" | "p_alternate_first_exon"  -> A5SS 
+ 
+ * "p_alt3prime"  | "alt3prime"  | "alternate_last_exon" |"p_alternate_last_exon"    -> A3SS 
+ 
+  \n(p_alt = putative alternative splice-site)
+ 
+ * "alternative intron" = retained_intron      -> RI
+ 
+ * "cassette" | "tandem_cassette"              -> SE
+ 
+ * "multi_exon_spanning" , "heatmap"           -> "Others"
+ 
+ * "junctions" | orphan_junction               -> Junctions
+ 
+ * "mutually_exclusive"                        -> MXE
+ 
+ 
+```{r function_calculate_splice_types_Sum}
+
+count_splice_types4pie <- function(mrg_tab, tool) {
+  
+    ##> Create a list with frequency of each splice-event per sample : 
+    ## imap: maps over each element of list and keeps names
+    #' Input: list of data.frames from majiq/rmats results (merged splice_types in one table)
+    #' Output : Data.frame with splice-event and frequency of each + Percentage of frequencies
+    #' Output2: PieChart with Freq + Percentages 
+
+    splice_types_sum <- imap(mrg_tab,  
+                                  \(sample_tab, sample_name) {
+                                    if ("event_type" %in% colnames(sample_tab)) {
+                                      #change column to be as rmats:splice_event
+                                      sample_tab <- dplyr::rename(sample_tab, "splice_event" ="event_type")
+                                    }
+                                    df_se <- data.frame(t(table(factor(sample_tab$splice_event))))
+                                    colnames(df_se) <- c("Var1","Splice_Event","Frequency")
+                                    df_se <- df_se %>% select(-"Var1") 
+                                    df_se
+                                    ##! must always print the value to be exported outside imap!
+                                  })
+                                  
+    ##> Sum over all samples : 
+    global_splice_sum <- splice_types_sum  %>% 
+                          bind_rows(.id = "sample_name") %>% 
+                          group_by(Splice_Event) %>%  
+                          summarise(Total_Number = sum(Frequency, na.rm = TRUE),.groups = "drop")
+          
+    # write_delim(global_splice_sum.mj,
+    #         file="SpliceTypes_piecharts/Global_SpliceEvents_Sum.txt",
+    #         delim="\t",
+    #         na="NA",
+    #         col_names = TRUE)
+    
+    splice_events <- levels(as.factor(global_splice_sum$Splice_Event))
+    
+    ##> Regroup Splice-Types if they are more than known-rmats groups :
+    if ( length(splice_events) > 7 ) { 
+      
+        global_splice_sum2 <- global_splice_sum %>% mutate(
+                              Splice_Type = case_when(
+                              Splice_Event %in% c("alt5prime", "alternate_first_exon",
+                                                  "p_alt5prime", "p_alternate_first_exon") ~ "A5SS",
+                              Splice_Event %in% c("alt3prime", "alternate_last_exon",
+                                                  "p_alt3prime", "p_alternate_last_exon")  ~ "A3SS",
+                              Splice_Event %in% c("cassette", "tandem_cassette")           ~ "SE",
+                              Splice_Event %in% c("junctions", "orphan_junction")          ~ "Junctions",
+                              Splice_Event %in% c("multi_exon_spanning", "heatmap")        ~ "Others",
+                              Splice_Event == "mutually_exclusive"                         ~ "MXE",
+                              Splice_Event == "alternative_intron"                         ~ "RI",
+                              TRUE ~ NA   # last security-escape, all event not-listed
+                            )) %>%
+                            group_by(Splice_Type) %>%
+                            summarise(Total_Number = sum(Total_Number), .groups = "drop")
+        
+         # change Splice_Group in factor for pie:
+        global_splice_sum2 <- mutate(global_splice_sum2,
+                                    Splice_Event = factor(Splice_Type))
+        
+        global_splice_sum <- global_splice_sum2 
+        
+     }
+    
+    global_splice_pct <- global_splice_sum  %>% 
+                            mutate(
+                              Percentage = Total_Number / sum(Total_Number) * 100,
+                              label = paste0(round(Percentage, 1), "%","(",Total_Number ,")")
+                              )
+
+    ## Use a Palette to cover all events and be flexible for different number of slices in piechart
+    library(paletteer) ## install.packages("paletteer")
+    library(geomtextpath)
+    # ! Attention to verify that values are not more than colours provided, here =18 !
+    events_colours <- paletteer_d("ggsci::uniform_startrek") 
+
+    ##> Visualize and label :
+    p <- ggplot(global_splice_pct, aes(x = "", y = Total_Number, fill=Splice_Event )) +
+                geom_col(width = 1, stat="identity",colour = "white", linewidth = 0.4) +
+                coord_polar(theta = "y", start=0) +
+                scale_fill_manual(values = events_colours,
+                              na.value = "grey70",
+                              guide="none") +     #guide: for legend of "event_type"
+            labs(
+                title    = glue::glue("{tool} Splicing Events [All samples]"),
+                subtitle = paste("Total events:", 
+                          scales::comma(sum(global_splice_sum$Total_Number))),
+                fill     = "Splice_Event") +
+            theme(
+                  panel.background = element_blank(),
+                  plot.background = element_blank(),
+                  axis.text = element_blank(),
+                  axis.ticks = element_blank()) +
+            # Percentage text 
+            geom_text(aes(x = 1.2, label = paste0(round(Percentage, 1), "%")),
+                      position = position_stack(vjust = 0.5),
+                      size = 3.5,
+                      colour = "#370335",
+                      fontface = "bold") +
+            # Labels text 
+            geom_labelpath(data = global_splice_pct,
+                           position = position_stack(vjust = 0.5),
+                            aes(x = 1.6, y = Total_Number, label = Splice_Event),
+                            size = 3.2,
+                            colour = "#370335",
+                            show.legend = FALSE); 
+    
+    print(p)
+    return(p)
+  ## modif with "geom_labelpath" by : 
+  ## https://stackoverflow.com/questions/74930665/r-fixing-labels-in-pie-chart
+
+}
+
+```
+
+ Call Function for Count + Plot
+
+```{r piechart_sumup_4majiq}
+
+p.majiq <- count_splice_types4pie(majiq_mrg_tables,"MAJIQ")
+p.majiq.filt <- count_splice_types4pie(majiq_mrg_tables.filt,"MAJIQ")
+
+##> Save output in PNG:
+dir.create("SpliceTypes_piecharts/",showWarnings = FALSE)
+pdf("SpliceTypes_piecharts/Piechart_All_samples_all-splice-types_Majiq.pdf")
+  print(p.majiq)
+  print(p.majiq.filt)
+dev.off()
+
+    
+```
+
+
+```{r save_in_file,echo=T,eval=F}
+
+###> Keep also in file :
+
+write_delim(global_splice_pct.mj,
+            file="SpliceTypes_piecharts/Global_SpliceGroups_Sum&Percentage.txt",
+            delim="\t",
+            na="NA",
+            col_names = TRUE)
+
+if (file.exists("SpliceTypes_piecharts/Global_SpliceGroups_Sum&Percentage.txt")){
+  print("Saved in file: \'SpliceTypes_piecharts/Global_SpliceGroups_Sum&Percentage.txt\' ")
+}
+
+```
+
+
+```{r piechart_No2_spliceGroups,echo=F,eval=F }
+
+Group_events_colours <- c( "A5SS"      = "#FFC125",
+                           "A3SS"      = "#FFEFDB",
+                           "SE"        = "#FF7256",
+                           "Junctions" = "#1C86EE",
+                           "MXE"       = "#ADD8E6",
+                           "Others"    = "#7CCD7C",
+                           "NA"        = "grey70"  )
+
+
+global_splice_sum2.mj <- global_splice_sum.mj %>% mutate(
+                            Splice_Type = case_when(
+                              Event_Type %in% c("alt5prime", "alternate_first_exon",
+                                                "p_alt5prime", "p_alternate_first_exon") ~ "A5SS",
+                              Event_Type %in% c("alt3prime", "alternate_last_exon",
+                                                "p_alt3prime", "p_alternate_last_exon")  ~ "A3SS",
+                              Event_Type %in% c("cassette", "tandem_cassette")           ~ "SE",
+                              Event_Type %in% c("junctions", "orphan_junction")          ~ "Junctions",
+                              Event_Type %in% c("multi_exon_spanning", "heatmap")        ~ "Others",
+                              Event_Type == "mutually_exclusive"                         ~ "MXE",
+                              Event_Type == "alternative_intron"                         ~ "RI",
+                              TRUE ~ NA   # last security-escape, all event not-listed
+                            )) %>%
+                            group_by(Splice_Type) %>%
+                            summarise(Total_Number = sum(Total_Number), .groups = "drop")
+        
+ # change Splice_Group in factor for pie:
+global_splice_sum2.mj <- mutate(global_splice_sum2.mj,
+                                Splice_Type = factor(Splice_Type))
+        
+
+global_splice_pct.mj <- global_splice_sum2.mj  %>% 
+                            mutate(
+                              Percentage = Total_Number / sum(Total_Number) * 100,
+                              label = paste0(round(Percentage, 1), "%","(",Total_Number ,")")
+                              )
+
+
+##> Visualise and label :
+p2 <- ggplot(global_splice_pct.mj, aes(x = "", y = Total_Number, fill=Splice_Type )) +
+            geom_col(width = 1, stat="identity", colour = "white", linewidth = 0.4) +
+            coord_polar(theta = "y", start=0) +
+            scale_fill_manual(values = Group_events_colours,
+                          na.value = "grey70",
+                          guide="none") +     #guide: for legend of "event_type"
+            labs(
+                  title    = "MAJIQ - Splicing Events [All samples]",
+                  subtitle = paste("Total events:",
+                            scales::comma(sum(global_splice_sum2.mj$Total_Number))),
+                  fill  = "Splice_Type") +
+            theme(
+                panel.background = element_blank(),
+                plot.background = element_blank(),
+                axis.text = element_blank(),
+                axis.ticks = element_blank()) +
+          # Percentage text
+          geom_text(aes(x = 1.2, label = paste0(round(Percentage, 1), "%")),
+                    position = position_stack(vjust = 0.5),
+                    size = 4,
+                    colour = "#370335",
+                    fontface = "bold") +
+          # Labels text
+          geom_labelpath(data = global_splice_pct.mj,
+                        position = position_stack(vjust = 0.5),
+                        aes(x = 1.6, y = Total_Number, label = Splice_Type),
+                        size = 3,
+                        colour = "#370335",
+                        show.legend = FALSE);
+
+print(p2)
+
+##> NOTE : 
+##' x=1 of geom_labelpath()| geom_text() locates the label more or less close to center.
+##' x < 1 : closer to center, x >1 : further from center to periphery
+
+
+png("SpliceTypes_piecharts/Piechart_All_samples_SpliceGroups_withPercentage_Majiq.png")
+  print(p2)
+dev.off()
+
+# if (file.exists("SpliceTypes_piecharts/Piechart_All_samples_SpliceGroups_withPercentage_Majiq.png")){
+#   print("Pie Chart saved in png:\n \'SpliceTypes_piecharts/Piechart_All_samples_SpliceGroups_withPercentage_Majiq.png\'")
+# }
+
+```
+
+#### rMATS - PieChart of Splicing Events on final_merged_tables 
+
+```{r rmats_pieChart_on_splice_events}
+
+## par "rmats_dir/merged_tables" -> rmats_mrg_tables
+
+# splice_types_sum.rmats <- imap(rmats_mrg_tables,  
+#                               \(rm_tab, sample_name) {
+#                                 rm_events <- data.frame(t(table(factor(rm_tab$splice_event))));
+#                                 colnames(rm_events) <- c("Var1","Splice_Event","Frequency")
+#                                 rm_events ##! must always print the value to be exported outside imap!
+#                               })
+#                               
+# ##> Sum over all samples : 
+# global_splice_sum.rmats <- splice_types_sum.rmats  %>% 
+#                       bind_rows(.id = "sample_name") %>% 
+#                       group_by(Splice_Event) %>%  
+#                       summarise(Total_Number = sum(Frequency, na.rm = TRUE),.groups = "drop")
+#                       
+# ##> with Percentage :
+# 
+# global_splice_pct.rmats <- global_splice_sum.rmats  %>% 
+#                       mutate(
+#                         percentage = Total_Number / sum(Total_Number) * 100,
+#                         label = paste0(round(percentage, 1), "%","(",Total_Number ,")")
+#                       )
+
+# library(geomtextpath)
+# 
+# p.rmats <- ggplot(global_splice_pct.rmats, 
+#                   aes(x = "", y = percentage, fill=Splice_Event )) +
+#                   geom_col(width = 1, stat="identity", colour = "white", linewidth = 0.4) +
+#                   coord_polar(theta = "y", start=0) +
+#                   scale_fill_manual(values = events_colours,
+#                                     na.value = "grey70",
+#                                     guide="none") +     #guide: for legend of "event_type"
+#                   labs(
+#                       title    = "rMATS-Splicing Events [All samples]",
+#                       subtitle = glue::glue("Total events: {sum(global_splice_pct.rmats$Total_Number)}"),
+#                       fill     = "Splice_Event") +
+#                   theme(
+#                         panel.background = element_blank(),
+#                         plot.background = element_blank(),
+#                         axis.text = element_blank(),
+#                         axis.ticks = element_blank()) +
+#                   # Percentage text INSIDE the slices
+#                   geom_text(aes(x = 0.95, label = paste0(round(percentage, 1), "%")),
+#                             position = position_stack(vjust = 0.5),
+#                             size = 4,
+#                             colour = "#030303",
+#                             fontface = "bold") +
+#                   geom_labelpath(data = global_splice_pct.rmats,
+#                                  position = position_stack(vjust = 0.5),
+#                                   aes(x = 1.6, y = percentage, label = Splice_Event),
+#                                   size = 3,
+#                                   show.legend = FALSE); 
+# 
+# p.rmats
+
+```
+
+
+```{r call_function_pieChart_rmats}
+
+p.rmats <- count_splice_types4pie(rmats_mrg_tables,"rMATS")
+p.rmats.filt <- count_splice_types4pie(rmats_mrg_tables.filt,"rMATS")
+
+
+dir.create("SpliceTypes_piecharts/",showWarnings = FALSE)
+pdf("SpliceTypes_piecharts/Piechart_All_samples_all-splice-types_rMATS.pdf",onefile = T)
+  print(p.rmats)
+  print(p.rmats.filt)
+dev.off()
+
+
+```
+
