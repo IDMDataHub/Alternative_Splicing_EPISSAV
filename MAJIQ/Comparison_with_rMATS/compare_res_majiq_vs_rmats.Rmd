@@ -550,21 +550,28 @@ p
 -  Doc_MAJIQ : 
 https://biociphers.bitbucket.io/majiq-docs/modulizer/event-types.html#putative-alternative-splice-sites-p-alt-5-3
 
- * "p_alt5prime"  | "alt5prime" | "alternate_first_exon" | "p_alternate_first_exon"  -> A5SS 
+ * "p_alt5prime"  | "alt5prime"                       -> A5SS 
  
- * "p_alt3prime"  | "alt3prime"  | "alternate_last_exon" |"p_alternate_last_exon"    -> A3SS 
+ * "alternate_first_exon" | "p_alternate_first_exon"  -> "AFE"
  
-  \n(p_alt = putative alternative splice-site)
+ * "p_alt3prime"  | "alt3prime"                       -> A3SS 
+ 
+ * "alternate_last_exon" |"p_alternate_last_exon"   -> "ALE"
  
  * "alternative intron" = retained_intron      -> RI
  
  * "cassette" | "tandem_cassette"              -> SE
  
- * "multi_exon_spanning" , "heatmap"           -> "Others"
+ * "multi_exon_spanning"                       -> "MES"
  
- * "junctions" | orphan_junction               -> Junctions
+ *  "orphan_junction"                            -> "Orphan_Junction"
  
  * "mutually_exclusive"                        -> MXE
+ 
+ Note: 
+ ignore "Junctions" that include multiple other event-types & "heatmap" \n  
+
+ p_alt = putative alternative splice-site
  
  
 ```{r function_calculate_splice_types_Sum}
@@ -609,15 +616,15 @@ count_splice_types4pie <- function(mrg_tab, tool) {
       
         global_splice_sum2 <- global_splice_sum %>% mutate(
                               Splice_Type = case_when(
-                              Splice_Event %in% c("alt5prime", "alternate_first_exon",
-                                                  "p_alt5prime", "p_alternate_first_exon") ~ "A5SS",
-                              Splice_Event %in% c("alt3prime", "alternate_last_exon",
-                                                  "p_alt3prime", "p_alternate_last_exon")  ~ "A3SS",
+                              Splice_Event %in% c("alt5prime", "p_alt5prime") ~ "A5SS",
+                              Splice_Event %in% c("alternate_first_exon","p_alternate_first_exon") ~ "AFE",
+                              Splice_Event %in% c("alt3prime","p_alt3prime")  ~ "A3SS",
+                              Splice_Event %in% c("alternate_last_exon","p_alternate_last_exon") ~ "ALE",
                               Splice_Event %in% c("cassette", "tandem_cassette")           ~ "SE",
-                              Splice_Event %in% c("junctions", "orphan_junction")          ~ "Junctions",
-                              Splice_Event %in% c("multi_exon_spanning", "heatmap")        ~ "Others",
-                              Splice_Event == "mutually_exclusive"                         ~ "MXE",
-                              Splice_Event == "alternative_intron"                         ~ "RI",
+                              Splice_Event %in% c("orphan_junction")          ~ "Orphan_Junction",
+                              Splice_Event %in% c("multi_exon_spanning")      ~ "MES",
+                              Splice_Event == "mutually_exclusive"            ~ "MXE",
+                              Splice_Event == "alternative_intron"            ~ "RI",
                               TRUE ~ NA   # last security-escape, all event not-listed
                             )) %>%
                             group_by(Splice_Type) %>%
@@ -640,8 +647,9 @@ count_splice_types4pie <- function(mrg_tab, tool) {
     ## Use a Palette to cover all events and be flexible for different number of slices in piechart
     library(paletteer) ## install.packages("paletteer")
     library(geomtextpath)
-    # ! Attention to verify that values are not more than colours provided, here =18 !
-    events_colours <- paletteer_d("ggsci::uniform_startrek") 
+    
+    # ! Attention to verify that values are not more than colours provided, here = 14 !
+    events_colours <- paletteer_d("colorBlindness::Blue2OrangeRed14Steps") 
 
     ##> Visualize and label :
     p <- ggplot(global_splice_pct, aes(x = "", y = Total_Number, fill=Splice_Event )) +
