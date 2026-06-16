@@ -1,0 +1,423 @@
+---
+title: "Pathways_of_spliced_genes"
+author: "Maria Kondili"
+date: "2026-06-09"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libs}
+
+library(tidyverse)
+library(clusterProfiler)
+library(fgsea)
+
+```
+
+#### Rename column of DPSI,necessary for gsea-function
+
+```{r rename_dpsi_column_for_gsea}
+
+majiq_mrg_tables.renam <- map(majiq_mrg_tables, 
+                              ~(.x <- rename(.x, 
+                                             "dPSI" = "grp2-grp1_median_dpsi",
+                                             "geneSymbol" = "gene_name")
+                            ))
+
+```
+
+```{r function: run_gsea_analysis.R }
+
+#input_data <- majiq_mrg_tables$C002I3K$grp2-grp1_median_dpsi
+# majiq_mrg_tables$C002I3K %>% mutate(`grp2-grp1_median_dpsi` = "dpsi")
+
+
+.run_gsea_analysis <- function( input_data,sampleID, myFDR, myNES){
+
+  # test : input_data <- majiq_mrg_tables.filt.renam$C002I3M
+  gsea_genes <- input_data$dPSI # instead of FoldChange
+  names(gsea_genes) <- input_data$geneSymbol # changed as rMATS column
+  #gsea_genes <- na.omit(gsea_genes)
+  #--> genes with FC="NA".IF in not any NA,will return original input
+  
+  dups <- duplicated(names(gsea_genes))
+  ## if there are duplicates (dups ==TRUE ):
+  if ( any(dups) ) {
+    gsea_genes <- gsea_genes[-which(dups)]
+  }
+  gsea_genes <- sort(gsea_genes, decreasing=T)
+  
+  #! sorting removes also NAs in values, but not in names:
+  #> remove any genes with name=NA 
+  if ( any(is.na(names(gsea_genes))) ) {
+    
+      gsea_genes <- gsea_genes[- which(is.na(names(gsea_genes)))]
+  }
+  
+  ###
+  ### FGSEA
+  ###
+  
+  pathw_dir="~/MYO_WORKSPACE/myScriptsBank/MSigDB_Hallmark_Pathways/2023/"
+  
+  set.seed(42)
+  
+  #----2023-----
+  #gmt_listfiles <- list.files(pathw_dir)
+  c2 <- gmtPathways(paste0(pathw_dir, "c2.all.v2023.2.Hs.symbols.gmt"))
+  c5 <- gmtPathways(paste0(pathw_dir, "c5.all.v2023.2.Hs.symbols.gmt"))
+  hm <- gmtPathways(paste0(pathw_dir, "h.all.v2023.2.Hs.symbols.gmt"))
+  ##ms <- gmtPathways(paste0(pathw_dir, "msigdb.v2023.2.Hs.symbols.gmt")) -> duplicate terms
+  
+  
+  gseaRes.c2 <- fgsea(c2, gsea_genes, minSize=15, maxSize=1000)
+  gseaRes.c5 <- fgsea(c5, gsea_genes, minSize=15, maxSize=1000)
+  gseaRes.hm <- fgsea(hm, gsea_genes, minSize=15, maxSize=1000)
+  
+  ## Filter with myFDR :
+  gseaRes <- dplyr::bind_rows( gseaRes.c2, gseaRes.c5,gseaRes.hm ) %>%
+               dplyr::filter(padj < myFDR ) %>% arrange(desc(NES))
+  
+  ## Reduce Redundant
+  # pathway2name <-  gseaRes[order(padj), setNames(pathway, pathway)]
+  # reduced_gsea <- eliminatePathways(universe=names(gsea_genes),
+  #                                 pathways=list(c2,c5,hm),
+  #                                 pathway2name=pathway2name,
+  #                                 isNonRandomPval=fgseaIsNonRandomPval(list(c2,c5,hm), gsea_genes, nperm=5000))
+  #
+  
+  ## Filter with myNES:
+  gseaRes2show <- subset(gseaRes, abs(NES)> myNES )
+  
+  ## Concatenate "LEADING_EDGE" Genes in one cell
+  gseaRes$leadingEdge <- unlist(map(gseaRes$leadingEdge , ~paste(.x ,collapse=",")))
+  
+  g <- ggplot(gseaRes2show, aes( reorder(pathway, NES),NES)) +
+              geom_col(aes(fill = padj)) +
+              coord_flip() +
+              labs(x="Pathway", 
+                   y="Normalized Enrichment Score",
+                   title= glue::glue("{sampleID},All signif Pathways (|NES|>{myNES})")
+                   ) +
+              theme(axis.text = element_text(size = 5)) +
+              theme(axis.title = element_text(size = 11))
+  print(g)
+  
+  return(gseaRes)
+}
+
+  
+```
+
+
+```{r test_func_1sample } 
+
+gseaRes.C002I3M <- .run_gsea_analysis(majiq_mrg_tables.renam$C002I3M,
+                                      sampleID="MajiQ::C002I3M",
+                                      myFDR=0.05,
+                                      myNES=0 )
+
+
+gseaRes.C002I3Z <- .run_gsea_analysis(majiq_mrg_tables.renam$C002I3Z,
+                                      sampleID="MajiQ::C002I3Z",
+                                      myFDR=0.05,
+                                      myNES=0 )
+
+```
+
+#### MAJIQ spliced genes - GSEA 
+
+```{r run_func_majiq_gsea}
+
+sampleIDs <- names(majiq_mrg_tables.renam)
+gsea_pathw_per_sample.mj    <- map2(.x = majiq_mrg_tables.renam,
+                                    .y = sampleIDs,
+                                    ~.run_gsea_analysis(.x,
+                                                        sampleID=.y,
+                                                        myFDR=0.05,
+                                                        myNES=0))
+
+
+null <- map(gsea_pathw_per_sample.mj, ~print(nrow(.x)))
+
+```
+
+#### rMATS spliced genes - GSEA
+
+```{r run_func_rmats_gsea}
+
+sample_names <- names(rmats_mrg_tables)
+gsea_pathw_per_sample.rmats <- map2(.x = rmats_mrg_tables,
+                                    .y = sample_names,
+                                   ~.run_gsea_analysis(.x,
+                                                       sampleID=.y,
+                                                       myFDR=0.05,
+                                                       myNES=0))
+
+null <- map(gsea_pathw_per_sample.rmats, ~print(nrow(.x)))
+
+## test 1sample: 
+
+.run_gsea_analysis(rmats_mrg_tables$C002I3Z,sampleID="C002I3Z", myFDR=0.05,myNES=0)
+
+```
+
+!!! 
+Message d'avis :
+Dans preparePathwaysAndStats(pathways, stats, minSize, maxSize, gseaParam,  :
+  There are ties in the preranked stats (87.84% of the list).
+The order of those tied genes will be arbitrary, which may produce unexpected results.
+
+
+####  ORA - analysis for same genes 
+
+clusterProfiler::enricher(
+   gene,
+   pvalueCutoff = 0.05,
+   pAdjustMethod = "BH",
+   universe = NULL,
+   minGSSize = 10,
+   maxGSSize = 500,
+   qvalueCutoff = 0.2,
+   gson = NULL,
+   TERM2GENE, # --> two columns,
+   TERM2NAME = NA
+ )
+
+
+
+-------r- BIOAPI (https://cran.r-project.org/web/packages/rbioapi/vignettes/rbioapi_do_enrich.html)----
+
+
+```{r}
+#install.packages("rbioapi")
+library(rbioapi)
+
+# reactome <- rba_reactome_analysis(input = covid_critical)
+
+```
+
+> MAJIQ Genes
+
+```{r}
+#geneids_K <- majiq_mrg_tables.renam$C002I3K$gene_id
+enrichr_libs <- rba_enrichr_libs(organism = "human")
+
+enrichr_libs #--> choose which to input @"gene_set_library"
+#..
+#..
+#..
+
+```
+
+
+```{r enrichr_for_majiq_genes }
+
+enrichr_GO_allsamples.mj <- map(majiq_mrg_tables.renam, 
+                             ~rba_enrichr(gene_list =.x$geneSymbol,
+                                          organism = "human",
+                                          gene_set_library = c("GO_Biological_Process_2023",
+                                                               "GO_Molecular_Function_2023",
+                                                               "GO_Cellular_Component_2023"),
+                                          regex_library_name = FALSE,
+                                          background_genes = NULL,
+                                          progress_bar = FALSE)
+)
+                            
+
+
+```
+
+> rMATS
+
+```{r enrichr_for_rmats_genes}
+
+## show how many genes for each sample: 
+map(rmats_mrg_tables, ~print(length(unique(.x$geneSymbol))))
+                                          
+
+enrichr_GO_allsamples.rm <- map(rmats_mrg_tables, 
+                             ~rba_enrichr(gene_list =.x$geneSymbol,
+                                          organism = "human",
+                                          gene_set_library = c("GO_Biological_Process_2023",
+                                                               "GO_Molecular_Function_2023",
+                                                               "GO_Cellular_Component_2023"),
+                                          regex_library_name = FALSE,
+                                          background_genes = NULL,
+                                          progress_bar = FALSE)
+)
+
+```
+
+### Compare :
+
+> 1. FILTER
+
+```{r filter_GOterms_results}
+## Function:
+filter_enrichr_res <- function(sample_enrichr){
+  
+  BP.filt <- sample_enrichr$GO_Biological_Process_2023 %>% dplyr::filter(Adjusted.P.value < 0.05)
+  MF.filt <- sample_enrichr$GO_Molecular_Function_2023 %>% dplyr::filter(Adjusted.P.value < 0.05)
+  CC.filt <- sample_enrichr$GO_Cellular_Component_2023 %>% dplyr::filter(Adjusted.P.value < 0.05)
+  
+  all_GO_enrichr <- bind_rows(BP.filt,MF.filt,CC.filt)
+  
+  return(all_GO_enrichr)
+  
+}
+
+## Call Function :
+all_GO_filt.mj <- map(enrichr_GO_allsamples.mj, ~filter_enrichr_res(.x))
+all_GO_filt.rm <- map(enrichr_GO_allsamples.rm, ~filter_enrichr_res(.x))
+
+
+```
+> 1.b Show Number of GO-terms per sample :
+
+```{r nb_of_terms_found}
+
+
+nb_terms.mj <- map(all_GO_filt.mj, ~length(.x$Term))
+nb_terms.rm <- map(all_GO_filt.rm, ~length(.x$Term))
+
+##!!! GO-terms from MAJIQ are all Zero except "M"-sample
+##!!! GO-terms from rMATS-results are > 1000 for all samples !
+```
+
+> 2. find common GO-terms
+
+```{r func_find_common_go_terms}
+
+## Function: 
+find_common_GOterms <- function(GO_tab_filt.mj , GO_tab_filt.rm,sample_name ){
+  
+  ##> TABLE_1
+    majiq_terms <- GO_tab_filt.mj[[sample_name]] %>%
+                    pull(Term) %>%
+                    unique() %>%
+                    na.omit()
+    ## TABLE_2
+    rmats_terms <- GO_tab_filt.rm[[sample_name]] %>%
+                    pull(Term) %>%
+                    unique() %>%
+                    na.omit()
+    
+   
+    common_terms <- intersect(majiq_terms , rmats_terms )
+    return(common_terms)
+  
+}
+
+## Call Function :
+common_GOterms <- map(names(all_GO_filt.rm), 
+                      ~find_common_GOterms(all_GO_filt.mj,
+                                           all_GO_filt.rm,
+                                            .x))
+  
+ 
+```
+
+--> common_GOterms 
+
+[[1]]
+character(0)
+
+[[2]]
+character(0)
+
+[[3]]
+[1] "Striated Muscle Contraction (GO:0006941)"
+
+[[4]]
+character(0)
+
+[[5]]
+character(0)
+
+[[6]]
+character(0)
+
+[[7]]
+character(0)
+
+[[8]]
+ [1] "Organelle Organization (GO:0006996)"                                        
+ [2] "Endosomal Transport (GO:0016197)"                                           
+ [3] "Vesicle-Mediated Transport (GO:0016192)"                                    
+ [4] "Regulation Of Focal Adhesion Assembly (GO:0051893)"                         
+ [5] "Membrane Organization (GO:0061024)"                                         
+ [6] "Protein Localization (GO:0008104)"                                          
+ [7] "post-Golgi Vesicle-Mediated Transport (GO:0006892)"                         
+ [8] "Cell-Substrate Junction Assembly (GO:0007044)"                              
+ [9] "Regulation Of Cell-Substrate Junction Assembly (GO:0090109)"                
+[10] "Cellular Response To Insulin Stimulus (GO:0032869)"                         
+[11] "Cytosolic Transport (GO:0016482)"                                           
+[12] "Positive Regulation Of Apoptotic Process (GO:0043065)"                      
+[13] "Glycerophospholipid Biosynthetic Process (GO:0046474)"                      
+[14] "Intracellular Protein Transport (GO:0006886)"                               
+[15] "Regulation Of Anatomical Structure Morphogenesis (GO:0022603)"              
+[16] "Regulation Of Stress Fiber Assembly (GO:0051492)"                           
+[17] "Focal Adhesion Assembly (GO:0048041)"                                       
+[18] "Golgi Vesicle Transport (GO:0048193)"                                       
+[19] "Actomyosin Structure Organization (GO:0031032)"                             
+[20] "Positive Regulation Of Cell Migration (GO:0030335)"                         
+[21] "Retrograde Transport, Endosome To Golgi (GO:0042147)"                       
+[22] "Cytoskeleton Organization (GO:0007010)"                                     
+[23] "Endomembrane System Organization (GO:0010256)"                              
+[24] "Protein Modification Process (GO:0036211)"                                  
+[25] "Protein Transport (GO:0015031)"                                             
+[26] "Regulation Of Cell Migration (GO:0030334)"                                  
+[27] "Endocytosis (GO:0006897)"                                                   
+[28] "Response To Insulin (GO:0032868)"                                           
+[29] "Peptidyl-Threonine Modification (GO:0018210)"                               
+[30] "Peptidyl-Serine Phosphorylation (GO:0018105)"                               
+[31] "Negative Regulation Of Protein Localization To Cell Periphery (GO:1904376)" 
+[32] "Negative Regulation Of Protein Localization To Plasma Membrane (GO:1903077)"
+[33] "Lamellipodium Organization (GO:0097581)"                                    
+[34] "Endoplasmic Reticulum Organization (GO:0007029)"                            
+[35] "Vesicle-Mediated Transport To The Plasma Membrane (GO:0098876)"             
+[36] "Positive Regulation Of Stress Fiber Assembly (GO:0051496)"                  
+[37] "Plasma Membrane Bounded Cell Projection Assembly (GO:0120031)"              
+[38] "Peptidyl-Serine Modification (GO:0018209)"                                  
+[39] "Peptidyl-Threonine Phosphorylation (GO:0018107)"                            
+[40] "Golgi To Plasma Membrane Transport (GO:0006893)"                            
+[41] "Insulin Receptor Signaling Pathway (GO:0008286)"                            
+[42] "Receptor-Mediated Endocytosis (GO:0006898)"                                 
+[43] "Phosphorylation (GO:0016310)"                                               
+[44] "Golgi To Endosome Transport (GO:0006895)"                                   
+[45] "Negative Regulation Of Cell-Substrate Junction Organization (GO:0150118)"   
+[46] "Negative Regulation Of Focal Adhesion Assembly (GO:0051895)"                
+[47] "Negative Regulation Of Protein Localization To Membrane (GO:1905476)"       
+
+[[9]]
+character(0)
+
+[[10]]
+character(0)
+
+[[11]]
+character(0)
+
+[[12]]
+character(0)
+
+[[13]]
+character(0)
+
+[[14]]
+character(0)
+
+[[15]]
+character(0)
+
+[[16]]
+character(0)
+
+[[17]]
+[1] "Positive Regulation Of Cell-Substrate Junction Organization (GO:0150117)"
