@@ -30,7 +30,7 @@ library(purrr)
 
 ```{r dirs}
 
-epissav_dir <- "~/MYO_WORKSPACE/PROJECTS/EPIS_SAV-JohnRendu/"
+epissav_dir <- "~/MYO_WORKSPACE/PROJECTS/EPIS_SAV/"
 majiq_wsp <- paste0(epissav_dir,"MAJIQ/")
 work_dir <- paste0(majiq_wsp,"Scripts/R_dowstream/")
 #setwd(work_dir)
