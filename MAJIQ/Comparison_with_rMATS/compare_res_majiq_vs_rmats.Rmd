@@ -30,10 +30,10 @@ library(purrr)
 
 ```{r dirs}
 
-epissav_dir <- "~/MYO_WORKSPACE/PROJECTS/EPIS_SAV/"
+epissav_dir <- "~/MYO_WORKSPACE/PROJECTS/EPIS_SAV-JohnRendu/"
 majiq_wsp <- paste0(epissav_dir,"MAJIQ/")
 work_dir <- paste0(majiq_wsp,"Scripts/R_dowstream/")
-#setwd(work_dir)
+setwd(work_dir)
 
 ```
 
@@ -93,7 +93,12 @@ mjq.num_rows_after_filt
 
 ```{r rmats_dir}
 
+##> with shortcuts of final .tsv:
 rmats_dir <- paste0(epissav_dir,"rMATS/Downstream_Analysis/Outputs/one_group_stat_off/Downstream_Outputs/final_rmats_merged/only_merged_tables/")
+
+##> on folders where final .tsv are:
+# rmats_dir <- paste0(epissav_dir,"rMATS/Downstream_Analysis/Outputs/one_group_stat_off/Downstream_Outputs/final_rmats_merged/")
+#rmats_res_dirs <- list.files(rmats_dir)
 
 ```
 
@@ -125,7 +130,8 @@ resolve_lnk <- function(filepath) {
 shortcuts <- list.files(rmats_dir, pattern="- Shortcut.lnk", full.names = TRUE)
 
 rmats_mrg_filenames <- map(shortcuts, ~resolve_lnk(.x) )
-
+#rmats_mrg_filenames <- list.files(rmats_dir, pattern="_FDRsorted.tsv", recursive = T, full.names = T ) 
+  
 rmats_mrg_tables   <-  map(rmats_mrg_filenames, ~read_delim(.x, delim="\t",
                                                           show_col_types = F,
                                                           col_names = TRUE)
@@ -159,9 +165,10 @@ rmats_dpsi_co <-  0.5
 
 
 ## Rows before: 
-num_rows_before_filt <- tibble( sample = samples.rmats, 
+rmats.num_rows_before_filt <- tibble( sample = samples.rmats, 
                                 num_rows= unlist(map(rmats_mrg_tables, ~nrow(.x))) )
 
+rmats.num_rows_before_filt
 
 ### Filter by dPSI :
 rmats_mrg_tables.filt   <-  map(rmats_mrg_filenames, ~read_delim(.x, delim="\t",
@@ -173,18 +180,17 @@ rmats_mrg_tables.filt   <-  map(rmats_mrg_filenames, ~read_delim(.x, delim="\t",
 names(rmats_mrg_tables.filt) <- samples.rmats
 
 ## Rows after: 
-num_rows_after_filt <- tibble( sample = samples.rmats, 
+rmats.num_rows_after_filt <- tibble( sample = samples.rmats, 
                                num_rows = unlist(map(rmats_mrg_tables.filt, ~nrow(.x))) )
 
-
+rmats.num_rows_after_filt
 ```
 
 #### Compare Events rmats/majiq
 
 > Find common genes 
 
-```{r names_common_genes }
-
+```{r function_common_genes }
 find_common_genes <- function(rmats_tab, majiq_tab,sample_name) {
 
     #' Read rmats_tab[[sample]]$geneSymbol &
@@ -210,8 +216,13 @@ find_common_genes <- function(rmats_tab, majiq_tab,sample_name) {
     
     return(common_genes)
 }
+```
+ 
+The common genes :
 
-# Find common genes for each sample
+```{r find_common_genes }
+
+#
 common_genes <- map(names(majiq_mrg_tables), 
                     ~find_common_genes( rmats_mrg_tables.filt,
                                         majiq_mrg_tables.filt,
@@ -219,20 +230,22 @@ common_genes <- map(names(majiq_mrg_tables),
 
 common_genes <- common_genes %>% set_names(names(majiq_mrg_tables))
 
+common_genes
+
 ```
 
-> Save as a list for use in another script
+ Save as a list for use in another script -> detect_disease_variants.R
 
 ```{r save_genes_in_rds }
-
-saveRDS(common_genes, file="Comparison_with_rMATS/Common_genes_found_rmats_majiq_filtered.rds")
+outdir <- "Comparison_with_rMATS/"
+saveRDS(common_genes, file=paste0(outdir,"Common_genes_found_rmats_majiq_filtered.rds"))
 ```
 
-> Save common-genes in file
+ Save common-genes in file
 
 ```{r common_genes_in_file}
 
-common_genes_outfile = glue::glue("Comparison_with_rMATS/Common_genes_rmats(dpsi={rmats_dpsi_co})-vs-majiq(dpsi={majiq_dpsi_co}).txt")
+common_genes_outfile = glue::glue("{outdir}/Common_genes_rmats(dpsi={rmats_dpsi_co})-vs-majiq(dpsi={majiq_dpsi_co}).txt")
 
 sink(common_genes_outfile)
   iwalk(common_genes, ~{
@@ -291,7 +304,7 @@ dir.create(outdir, showWarnings = FALSE)
 
 readr::write_delim(common_genes_counts,
                    file = paste0(outdir, "Table_common_genes_per_sample_after_filt.tsv"),
-                   delim = "\t",append = FALSE)
+                   delim = "\t", append = FALSE)
 
 ```
 
@@ -457,7 +470,7 @@ map(names(majiq_mrg_tables.filt),
                                                   majiq_mrg_tables.filt,
                                                   .x) )
 
-out_fname <- "rMATS_and_MAJIQ_filt_results_per_sample.xlsx"
+out_fname <- "rMATS_and_MAJIQ_filt_results_per_sample_06-07-26.xlsx"
 openxlsx::saveWorkbook(wb = xl_wb,
                       file =paste0("Comparison_with_rMATS/",out_fname),
                       overwrite =  TRUE )
