@@ -812,17 +812,17 @@ count_splice_types4pie <- function(mrg_tab, tool) {
             #           fontface = "bold") +
             ## Label text with "Percentage (number)"
             geom_text(aes(x = 1.2, label = label),
-                           position = position_stack(vjust = 0.5),
-                          size = 3.5,
-                          colour = "#370335",
-                           fontface = "bold") +
+                         position = position_stack(vjust = 0.5),
+                         size = 3.5,
+                         colour = "#370335",
+                         fontface = "bold") +
             ## splice-types Labels per slice 
             geom_labelpath(data = global_splice_pct,
                            position = position_stack(vjust = 0.5),
-                            aes(x = 1.6, y = Total_Number, label = Splice_Event),
-                            size = 3.2,
-                            colour = "#370335",
-                            show.legend = FALSE); 
+                           aes(x = 1.6, y = Total_Number, label = Splice_Event),
+                           size = 3.2,
+                           colour = "#370335",
+                           show.legend = FALSE); 
     
     print(p)
     return(p)
